@@ -2927,6 +2927,38 @@
     "tr": "OpenHands Logosu",
     "uk": "OpenHands лого"
   },
+  "BRANDING$HOME": {
+    "en": "Home",
+    "ja": "ホーム",
+    "zh-CN": "首页",
+    "zh-TW": "首頁",
+    "ko-KR": "홈",
+    "de": "Startseite",
+    "no": "Hjem",
+    "it": "Home",
+    "pt": "Início",
+    "es": "Inicio",
+    "ar": "الرئيسية",
+    "fr": "Accueil",
+    "tr": "Ana Sayfa",
+    "uk": "Головна"
+  },
+  "BRANDING$HOME_BUTTON": {
+    "en": "Home Button",
+    "ja": "ホームボタン",
+    "zh-CN": "首页按钮",
+    "zh-TW": "首頁按鈕",
+    "ko-KR": "홈 버튼",
+    "de": "Startseite-Schaltfläche",
+    "no": "Hjem-knapp",
+    "it": "Pulsante home",
+    "pt": "Botão de início",
+    "es": "Botón de inicio",
+    "ar": "زر الصفحة الرئيسية",
+    "fr": "Bouton d'accueil",
+    "tr": "Ana Sayfa Düğmesi",
+    "uk": "Кнопка головної сторінки"
+  },
   "ERROR$GENERIC": {
     "en": "An error occurred",
     "ja": "エラーが発生しました",
