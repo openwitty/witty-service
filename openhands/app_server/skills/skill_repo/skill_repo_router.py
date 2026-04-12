@@ -173,7 +173,7 @@ async def get_discovered_one_repo_skill(
     return SkillRepoDiscoverPage(items=items)
 
 
-@router.get('/skills/repos/discover/status', response_model=SkillRepoDiscoverStatus)
+@router.get('/skills/repos/discover-status', response_model=SkillRepoDiscoverStatus)
 async def get_discover_status(
     user_context: UserContext = user_dependency,
     db_session: AsyncSession = db_session_dependency,
