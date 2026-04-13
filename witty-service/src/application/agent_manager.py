@@ -281,7 +281,7 @@ class AgentManager:
         agent_id: str,
         session_id: str,
         content: str,
-    ) -> list[dict[str, Any]]:
+    ) -> dict[str, Any]:
         agent = self._get_agent(agent_id)
 
         if agent.status is AgentStatus.paused:
@@ -315,13 +315,16 @@ class AgentManager:
         }
         await ws_client.send(msg)
 
-        events = []
+        events: list[dict[str, Any]] = []
         async for event in ws_client.recv():
             events.append(dict(event))
             if event["type"] == "message.completed":
                 break
 
-        return events
+        return {
+            "sandbox_type": agent.sandbox_type,
+            "events": events,
+        }
 
     def delete_agent(self, agent_id: str) -> None:
         agent = self._get_agent(agent_id)

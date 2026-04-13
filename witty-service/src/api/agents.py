@@ -134,15 +134,15 @@ def delete_session(
     "/{agent_id}/sessions/{session_id}/messages",
     response_model=MessageEventsResponse,
 )
-def send_message(
+async def send_message(
     agent_id: str,
     session_id: str,
     payload: SendMessageRequest,
     services: ServiceContainer = Depends(get_services),
 ) -> MessageEventsResponse:
     manager = services.get_agent_manager_for_agent(agent_id)
-    events = manager.send_message(agent_id=agent_id, session_id=session_id, content=payload.content)
-    return MessageEventsResponse(events=events)
+    result = await manager.send_message(agent_id=agent_id, session_id=session_id, content=payload.content)
+    return MessageEventsResponse.model_validate(result)
 
 
 def _to_agent_response(agent: AgentRecord, default_session_id: str | None) -> AgentResponse:
