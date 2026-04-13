@@ -73,3 +73,8 @@ class PaginationInfo(BaseModel):
 class SessionEventPage(BaseModel):
     items: list[SessionEventItem]
     pagination: PaginationInfo
+
+
+class SessionEventsResponse(BaseModel):
+    items: list[SessionEventItem]
+    pagination: PaginationInfo
