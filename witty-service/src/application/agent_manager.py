@@ -305,9 +305,9 @@ class AgentManager:
 
     def resume_agent(self, agent_id: str) -> AgentRecord:
         agent = self._get_agent(agent_id)
-        self._ensure_transition(agent, AgentStatus.running)
 
         if agent.status == AgentStatus.paused:
+            self._ensure_transition(agent, AgentStatus.running)
             return asyncio.get_event_loop().run_until_complete(
                 self._resume_from_paused(agent_id)
             )
