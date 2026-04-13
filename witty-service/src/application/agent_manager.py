@@ -276,6 +276,9 @@ class AgentManager:
 
         if adaptor_client is None:
             adaptor_client = self._get_adaptor_http_client(agent_id)
+            client_closer = adaptor_client.close
+        else:
+            client_closer: Callable[[], Any] = lambda: None
 
         if agent.status is AgentStatus.paused:
             agent = self.resume_agent(agent_id)
@@ -295,23 +298,26 @@ class AgentManager:
         ws_client = await self._prepare_ws_message_client(agent_id, session_id, content)
 
         events: list[dict[str, Any]] = []
-        async for event in ws_client.recv():
-            event_dict = dict(event)
+        try:
+            async for event in ws_client.recv():
+                event_dict = dict(event)
 
-            # Handle client.error events from witty-agent-server
-            if event_dict["type"] == "client.error":
-                error_payload = event_dict.get("payload", {})
-                error_code = error_payload.get("code", "UNKNOWN_ERROR")
-                error_message = error_payload.get("message", "Unknown error from adaptor")
-                raise DomainError(
-                    code=error_code,
-                    message=error_message,
-                    details={"session_id": session_id, "agent_id": agent_id},
-                )
+                # Handle client.error events from witty-agent-server
+                if event_dict["type"] == "client.error":
+                    error_payload = event_dict.get("payload", {})
+                    error_code = error_payload.get("code", "UNKNOWN_ERROR")
+                    error_message = error_payload.get("message", "Unknown error from adaptor")
+                    raise DomainError(
+                        code=error_code,
+                        message=error_message,
+                        details={"session_id": session_id, "agent_id": agent_id},
+                    )
 
-            events.append(event_dict)
-            if event_dict["type"] == "message.completed":
-                break
+                events.append(event_dict)
+                if event_dict["type"] == "message.completed":
+                    break
+        finally:
+            await client_closer()
 
         return {
             "sandbox_type": agent.sandbox_type,
