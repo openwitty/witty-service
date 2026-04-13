@@ -29,6 +29,7 @@ class AgentCreateRequest:
     sandbox_type: str
     adapter_type: str
     idle_timeout_seconds: int
+    description: str = ""
     sandbox_id: str | None = None
     has_scheduled_tasks: bool = False
 
@@ -54,6 +55,7 @@ class AgentRepository(Protocol):
         adapter_type: str,
         workspace_path: str,
         idle_timeout_seconds: int,
+        description: str = "",
         status: AgentStatus = AgentStatus.creating,
         sandbox_id: str | None = None,
         has_scheduled_tasks: bool = False,
@@ -135,7 +137,7 @@ class AgentManager:
                 request=request,
                 workspace_path=workspace_path,
             )
-            sandbox_handle = self._sandbox_backend.start( 
+            sandbox_handle = self._sandbox_backend.start(
                 agent_id=agent_id,
                 workspace_path=workspace_path,
             )
@@ -402,6 +404,7 @@ class AgentManager:
         return self._repository.create_agent_with_id(
             agent_id=agent_id,
             name=request.name,
+            description=request.description,
             sandbox_type=request.sandbox_type,
             adapter_type=request.adapter_type,
             workspace_path=workspace_path,

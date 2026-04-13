@@ -35,6 +35,7 @@ def create_agent(
     result = manager.create_agent(
         AgentCreateRequest(
             name=payload.name,
+            description=payload.description,
             sandbox_type=payload.sandbox_type,
             adapter_type=payload.adapter_type,
             idle_timeout_seconds=payload.idle_timeout_seconds,
@@ -187,6 +188,7 @@ def _to_agent_response(agent: AgentRecord, default_session_id: str | None) -> Ag
     return AgentResponse(
         id=agent.id,
         name=agent.name,
+        description=agent.description,
         sandbox_type=agent.sandbox_type,
         adapter_type=agent.adapter_type,
         status=agent.status.value,

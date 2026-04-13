@@ -89,6 +89,7 @@ curl -s http://127.0.0.1:8000/healthz
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | `name` | string | 是 | Agent 名称，最小长度 1 |
+| `description` | string | 否 | Agent 描述，默认空字符串 |
 | `sandbox_type` | string | 是 | 沙箱类型：`docker`、`local_process`、`e2b` |
 | `adapter_type` | string | 是 | 适配器类型：如 `openclaw` |
 | `idle_timeout_seconds` | integer | 是 | 空闲超时时间（秒），必须大于 0 |
@@ -101,6 +102,7 @@ curl -s http://127.0.0.1:8000/healthz
 {
   "id": "agent-uuid",
   "name": "my-agent",
+  "description": "这是一个测试智能体",
   "sandbox_type": "docker",
   "adapter_type": "openclaw",
   "status": "running",
@@ -118,6 +120,7 @@ curl -s http://127.0.0.1:8000/healthz
 |------|------|------|
 | `id` | string | Agent 唯一标识 |
 | `name` | string | Agent 名称 |
+| `description` | string | Agent 描述 |
 | `sandbox_type` | string | 沙箱类型 |
 | `adapter_type` | string | 适配器类型 |
 | `status` | string | Agent 状态：`running`、`paused`、`stopped` |
@@ -140,6 +143,7 @@ curl -s http://127.0.0.1:8000/healthz
   {
     "id": "agent-uuid-1",
     "name": "my-agent",
+    "description": "这是一个测试智能体",
     "sandbox_type": "docker",
     "adapter_type": "openclaw",
     "status": "running",
@@ -169,6 +173,7 @@ curl -s http://127.0.0.1:8000/healthz
 {
   "id": "agent-uuid",
   "name": "my-agent",
+  "description": "这是一个测试智能体",
   "sandbox_type": "docker",
   "adapter_type": "openclaw",
   "status": "running",
@@ -415,6 +420,7 @@ AGENT_ID=$(
     -H 'authorization: Bearer YOUR_TOKEN' \
     -d '{
       "name": "e2e-docker-agent",
+      "description": "Docker 场景测试智能体",
       "sandbox_type": "docker",
       "adapter_type": "openclaw",
       "idle_timeout_seconds": 3600
@@ -475,6 +481,7 @@ AGENT_ID=$(
     -H 'authorization: Bearer YOUR_TOKEN' \
     -d '{
       "name": "e2e-local-agent",
+      "description": "Local Process 场景测试智能体",
       "sandbox_type": "local_process",
       "adapter_type": "openclaw",
       "idle_timeout_seconds": 3600
