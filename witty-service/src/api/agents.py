@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import json
+from typing import Any, AsyncIterator
+
 from fastapi import APIRouter, Depends, Request, Response, status
+from fastapi.responses import StreamingResponse
 
 from src.api.auth import require_bearer_auth
 from src.api.schemas import (
@@ -145,6 +149,31 @@ async def send_message(
     return MessageEventsResponse.model_validate(result)
 
 
+@router.post(
+    "/{agent_id}/sessions/{session_id}/messages/stream",
+    response_class=StreamingResponse,
+)
+async def send_message_stream(
+    agent_id: str,
+    session_id: str,
+    payload: SendMessageRequest,
+    services: ServiceContainer = Depends(get_services),
+) -> StreamingResponse:
+    manager = services.get_agent_manager_for_agent(agent_id)
+
+    async def stream() -> AsyncIterator[str]:
+        async for event in manager.send_message_stream(
+            agent_id=agent_id,
+            session_id=session_id,
+            content=payload.content,
+        ):
+            yield _format_sse_data(event)
+            if event["event"]["type"] == "message.completed":
+                break
+
+    return StreamingResponse(stream(), media_type="text/event-stream")
+
+
 def _to_agent_response(agent: AgentRecord, default_session_id: str | None) -> AgentResponse:
     return AgentResponse(
         id=agent.id,
@@ -160,3 +189,7 @@ def _to_agent_response(agent: AgentRecord, default_session_id: str | None) -> Ag
         updated_at=agent.updated_at,
         default_session_id=default_session_id,
     )
+
+
+def _format_sse_data(event: dict[str, Any]) -> str:
+    return f"data: {json.dumps(event)}\n\n"

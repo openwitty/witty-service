@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any, Callable, Protocol
+from typing import Any, AsyncIterator, Callable, Protocol
 from uuid import uuid4
 
 from src.adapter.websocket_client_pool import AdaptorEndpoint, WebSocketClientPool
@@ -325,6 +325,38 @@ class AgentManager:
             "sandbox_type": agent.sandbox_type,
             "events": events,
         }
+
+    async def send_message_stream(
+        self,
+        agent_id: str,
+        session_id: str,
+        content: str,
+    ) -> AsyncIterator[dict[str, Any]]:
+        agent = self._get_agent(agent_id)
+
+        if agent.status is AgentStatus.paused:
+            agent = self.resume_agent(agent_id)
+        elif agent.status is not AgentStatus.running:
+            raise DomainError(
+                code=AGENT_NOT_RUNNING,
+                message="Agent must be running to send messages.",
+                details={"agent_id": agent_id, "status": agent.status.value},
+            )
+
+        self._repository.create_message(
+            agent_id=agent_id,
+            session_id=session_id,
+            role="user",
+            content=content,
+        )
+
+        for upstream_event in self._adapter_client(agent_id).send_message_stream(session_id, content):
+            yield {
+                "sandbox_type": agent.sandbox_type,
+                "event": upstream_event,
+            }
+            if upstream_event["type"] == "message.completed":
+                break
 
     def delete_agent(self, agent_id: str) -> None:
         agent = self._get_agent(agent_id)
