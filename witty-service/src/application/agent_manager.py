@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import httpx
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -13,7 +14,7 @@ from src.adapter.websocket_client import WebSocketClient
 from src.domain.enums import AgentStatus, can_transition
 from src.domain.errors import DomainError
 from src.persistence.repositories import AgentRecord, SessionRecord
-from src.sandbox.base import SandboxHandle, sandbox_not_found
+from src.sandbox.base import SandboxHandle, SandboxStatus, sandbox_not_found
 from src.storage.runtime_backup import RuntimeBackupStore
 from .session_manager import SessionManager
 
@@ -25,6 +26,9 @@ AGENT_CREATE_FAILED = "AGENT_CREATE_FAILED"
 AGENT_PAUSE_FAILED = "AGENT_PAUSE_FAILED"
 AGENT_RESUME_FAILED = "AGENT_RESUME_FAILED"
 AGENT_DELETE_FAILED = "AGENT_DELETE_FAILED"
+RUNTIME_BACKUP_NOT_FOUND = "RUNTIME_BACKUP_NOT_FOUND"
+SANDBOX_NOT_READY = "SANDBOX_NOT_READY"
+RUNTIME_START_FAILED = "RUNTIME_START_FAILED"
 
 
 @dataclass(slots=True, frozen=True)
@@ -207,52 +211,113 @@ class AgentManager:
 
         return self._repository.update_agent_status(agent_id, AgentStatus.paused)
 
+    async def _resume_from_deleted(self, agent_id: str) -> AgentRecord:
+        """从 deleted 状态恢复"""
+        agent = self._get_agent(agent_id)
+
+        # 1. 检查备份
+        backup_store = RuntimeBackupStore()
+        if not backup_store.backup_exists(agent_id, agent.adapter_type):
+            raise DomainError(
+                code=RUNTIME_BACKUP_NOT_FOUND,
+                message="Runtime backup not found.",
+                details={"agent_id": agent_id},
+            )
+
+        # 2. 恢复运行时备份
+        backup_store.restore(agent_id, agent.adapter_type)
+
+        # 3. 重新启动沙箱
+        sandbox_handle = self._sandbox_backend.start(
+            agent_id=agent_id,
+            workspace_path=agent.workspace_path,
+        )
+        adapter_endpoint = self._sandbox_backend.endpoint(sandbox_handle)
+
+        # 4. 保存沙箱状态
+        self._repository.save_sandbox_state(
+            agent_id,
+            sandbox_payload_json=self._sandbox_handle_payload(sandbox_handle),
+            adapter_base_url=adapter_endpoint.base_url,
+            adapter_ready=True,
+        )
+
+        # 5. 等待沙箱就绪
+        adaptor_client = self._get_adaptor_http_client(agent_id)
+        try:
+            for _ in range(30):  # 30 秒超时
+                if await adaptor_client.health_check():
+                    break
+                await asyncio.sleep(1)
+            else:
+                raise DomainError(
+                    code=SANDBOX_NOT_READY,
+                    message="Sandbox health check timeout.",
+                    details={"agent_id": agent_id},
+                )
+        finally:
+            await adaptor_client.close()
+
+        # 6. 调用 /agent/start
+        adaptor_client = self._get_adaptor_http_client(agent_id)
+        try:
+            try:
+                await adaptor_client.post("/agent/start", json={})
+            except httpx.HTTPStatusError as exc:
+                raise DomainError(
+                    code=RUNTIME_START_FAILED,
+                    message="Failed to start runtime.",
+                    details={"agent_id": agent_id, "error": str(exc)},
+                ) from exc
+        finally:
+            await adaptor_client.close()
+
+        # 7. 更新状态
+        return self._repository.update_agent_status(agent_id, AgentStatus.running)
+
+    async def _resume_from_paused(self, agent_id: str) -> AgentRecord:
+        """从 paused 状态恢复"""
+        agent = self._get_agent(agent_id)
+
+        # 1. 验证沙箱是否仍在运行
+        sandbox_state = self._get_sandbox_state(agent_id)
+        status = self._sandbox_backend.status(sandbox_state.handle)
+        if status == SandboxStatus.stopped:
+            # 沙箱已停止，降级到 deleted 场景
+            return await self._resume_from_deleted(agent_id)
+
+        # 2. 调用 /agent/start
+        adaptor_client = self._get_adaptor_http_client(agent_id)
+        try:
+            try:
+                await adaptor_client.post("/agent/start", json={})
+            except httpx.HTTPStatusError as exc:
+                raise DomainError(
+                    code=RUNTIME_START_FAILED,
+                    message="Failed to start runtime.",
+                    details={"agent_id": agent_id, "error": str(exc)},
+                ) from exc
+        finally:
+            await adaptor_client.close()
+
+        # 3. 更新状态
+        return self._repository.update_agent_status(agent_id, AgentStatus.running)
+
     def resume_agent(self, agent_id: str) -> AgentRecord:
         agent = self._get_agent(agent_id)
         self._ensure_transition(agent, AgentStatus.running)
-        previous_sandbox_state = self._get_sandbox_state(agent_id)
-        sandbox_handle: SandboxHandle | None = None
-        adapter_base_url = previous_sandbox_state.adapter_base_url
-        cleanup_errors: list[dict[str, str]] = []
-        try:
-            sandbox_handle = self._sandbox_backend.start(
-                agent_id=agent_id,
-                workspace_path=agent.workspace_path,
+
+        if agent.status == AgentStatus.paused:
+            return self._resume_from_paused(agent_id)
+        elif agent.status == AgentStatus.deleted:
+            return asyncio.get_event_loop().run_until_complete(
+                self._resume_from_deleted(agent_id)
             )
-            adapter_endpoint = self._sandbox_backend.endpoint(sandbox_handle)
-            adapter_base_url = adapter_endpoint.base_url
-            self._repository.save_sandbox_state(
-                agent_id,
-                sandbox_payload_json=self._sandbox_handle_payload(sandbox_handle),
-                adapter_base_url=adapter_base_url,
-                adapter_ready=True,
-                last_error=None,
-            )
-            return self._repository.update_agent_status(agent_id, AgentStatus.running)
-        except Exception as exc:
-            if sandbox_handle is not None:
-                self._collect_error(
-                    cleanup_errors,
-                    "sandbox_cleanup",
-                    lambda: self._sandbox_backend.cleanup(sandbox_handle),
-                )
-            compensation_errors: list[dict[str, str]] = []
-            if not cleanup_errors:
-                compensation_errors = self._compensate_sandbox_state(
-                    agent_id=agent_id,
-                    sandbox_handle=sandbox_handle or previous_sandbox_state.handle,
-                    adapter_base_url=adapter_base_url,
-                    adapter_ready=False,
-                    last_error=self._error_message(exc),
-                    status_on_error=None,
-                )
-            self._raise_operation_failed(
-                code=AGENT_RESUME_FAILED,
-                message="Agent resume failed.",
-                agent_id=agent_id,
-                cause=exc,
-                cleanup_errors=cleanup_errors,
-                compensation_errors=compensation_errors,
+        else:
+            raise DomainError(
+                code=INVALID_AGENT_TRANSITION,
+                message="Cannot resume from current status.",
+                details={"agent_id": agent_id, "status": agent.status.value},
             )
 
     async def send_message(
