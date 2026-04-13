@@ -17,9 +17,9 @@ class WorkspaceStore:
             raise ValueError("base_dir and base_path must refer to the same path")
 
         if base_dir is not None:
-            self.base_dir = Path(base_dir).expanduser().resolve()
+            self.base_dir = Path(base_dir)
         else:
-            self.base_dir = Path(base_path).expanduser().resolve()
+            self.base_dir = Path(base_path)
 
     def init_workspace(self, agent_id: str) -> Path:
         workspace_path = self._agent_workspace_path(agent_id)
@@ -56,5 +56,5 @@ class WorkspaceStore:
 
 
 class LocalWorkspaceStore(WorkspaceStore):
-    def __init__(self, base_path: str | Path = "~/witty-service/agent-workspaces") -> None:
+    def __init__(self, base_path: str | Path = "/data/agent-workspaces") -> None:
         super().__init__(base_path=base_path)

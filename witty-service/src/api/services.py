@@ -20,6 +20,7 @@ from src.storage.workspace_store import LocalWorkspaceStore, WorkspaceStore
 class ServiceContainer:
     repository: SqliteRepository
     workspace_store: WorkspaceStore
+    adapter_client_factory: Callable[[str], Any] = field(default=lambda x: None)
     sandbox_backends: dict[str, SandboxBackend] = field(default_factory=dict)
     ws_client_pool: WebSocketClientPool = field(default_factory=WebSocketClientPool)
     session_manager: SessionManager = field(init=False)
@@ -41,6 +42,7 @@ class ServiceContainer:
             session_manager=self.session_manager,
             workspace_store=self.workspace_store,
             sandbox_backend=self.get_sandbox_backend(sandbox_type),
+            adapter_client_factory=self.adapter_client_factory,
             ws_client_pool=self.ws_client_pool,
         )
 
@@ -56,9 +58,8 @@ class ServiceContainer:
 
 
 def build_default_services() -> ServiceContainer:
-    _default_db_path = os.path.expanduser("~/witty-service/db/witty_service.sqlite3")
-    database_url = os.getenv("WITTY_DATABASE_URL", f"sqlite:///{_default_db_path}")
-    workspace_base = os.getenv("WITTY_WORKSPACE_BASE", "~/witty-service/agent-workspaces")
+    database_url = os.getenv("WITTY_DATABASE_URL", "sqlite:///./witty_service.sqlite3")
+    workspace_base = os.getenv("WITTY_WORKSPACE_BASE", "/data/agent-workspaces")
 
     engine = create_sqlite_engine(database_url)
     init_db(engine)
