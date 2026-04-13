@@ -9,7 +9,7 @@
 当前接口基线：
 - Agent 生命周期：`/api/v1/agents/*`
 - Session：`/api/v1/agents/{agent_id}/sessions/*`
-- WebSocket 消息：`/api/v1/agents/{agent_id}/sessions/{session_id}/messages`
+- 消息接口：`/api/v1/agents/{agent_id}/sessions/{session_id}/messages`、`/api/v1/agents/{agent_id}/sessions/{session_id}/messages/stream`
 - 健康检查：`/healthz`
 
 ## 1. 前置准备
@@ -75,6 +75,7 @@ curl -s http://127.0.0.1:8000/healthz
 | `/api/v1/agents/{agent_id}/sessions/{session_id}` | `GET` | 获取会话详情 |
 | `/api/v1/agents/{agent_id}/sessions/{session_id}` | `DELETE` | 删除会话 |
 | `/api/v1/agents/{agent_id}/sessions/{session_id}/messages` | `POST` | 发送消息 |
+| `/api/v1/agents/{agent_id}/sessions/{session_id}/messages/stream` | `POST` | 发送消息并以 SSE 流返回 |
 
 ### 3.3 Agent 生命周期接口
 
@@ -170,7 +171,7 @@ curl -s http://127.0.0.1:8000/healthz
 
 #### `POST /api/v1/agents/{agent_id}/sessions/{session_id}/messages`
 
-- 接口描述：通过 WebSocket 向 adaptor service 发送消息并接收事件流
+- 接口描述：通过 REST 向 adaptor service 发送消息并返回非流式聚合结果
 - 输入：
 
 ```json
@@ -183,34 +184,53 @@ curl -s http://127.0.0.1:8000/healthz
 
 ```json
 {
+  "sandbox_type": "openclaw",
   "events": [
     {
       "type": "message.delta",
       "session_id": "session-id",
-      "sandbox_type": "openclaw",
       "event_id": "uuid",
       "ts_ms": 1775650000123,
+      "runtime_type": "openclaw",
       "payload": {"delta": "当"}
     },
     {
       "type": "message.delta",
       "session_id": "session-id",
-      "sandbox_type": "openclaw",
       "event_id": "uuid",
       "ts_ms": 1775650000123,
+      "runtime_type": "openclaw",
       "payload": {"delta": "前环境"}
     },
     {
       "type": "message.completed",
       "session_id": "session-id",
-      "sandbox_type": "openclaw",
       "event_id": "uuid",
       "ts_ms": 1775650000123,
+      "runtime_type": "openclaw",
       "payload": {"text": "当前工作环境..."}
     }
   ]
 }
 ```
+
+- 说明：
+  - 顶层 `sandbox_type` 表示本次消息所属的 sandbox 类型。
+  - `events[]` 内不再包含 `sandbox_type`；事件对象保持上游 envelope 结构，字段会保留 `runtime_type` 等原始信息。
+
+#### `POST /api/v1/agents/{agent_id}/sessions/{session_id}/messages/stream`
+
+- 接口描述：通过 REST 向 adaptor service 发送消息并以 SSE 流式返回事件
+- 响应类型：`text/event-stream`
+- 每条 SSE `data:` 的格式：
+
+```text
+data: {"sandbox_type":"openclaw","event":{"type":"message.delta","session_id":"session-id","event_id":"uuid","ts_ms":1775650000123,"runtime_type":"openclaw","payload":{"delta":"当"}}}
+```
+
+- 说明：
+  - SSE 中每条 `data:` 对应一个上游事件。
+  - `event` 的内容保持上游 envelope 结构，包含 `runtime_type`，不额外嵌套 `sandbox_type`。
 
 ### 3.6 事件类型
 
