@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 class CreateAgentRequest(BaseModel):
     name: str = Field(min_length=1)
+    description: str = ""
     sandbox_type: str = Field(min_length=1)
     adapter_type: str = Field(min_length=1)
     idle_timeout_seconds: int = Field(gt=0)
@@ -24,6 +25,7 @@ class AgentResponse(BaseModel):
 
     id: str
     name: str
+    description: str
     sandbox_type: str
     adapter_type: str
     status: str

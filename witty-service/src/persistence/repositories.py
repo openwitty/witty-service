@@ -25,6 +25,7 @@ from src.sandbox.base import SandboxHandle
 class AgentRecord:
     id: str
     name: str
+    description: str
     sandbox_type: str
     adapter_type: str
     status: AgentStatus
@@ -77,6 +78,7 @@ class SqliteRepository:
         adapter_type: str,
         workspace_path: str,
         idle_timeout_seconds: int,
+        description: str = "",
         status: AgentStatus | str = AgentStatus.creating,
         sandbox_id: str | None = None,
         has_scheduled_tasks: bool = False,
@@ -89,6 +91,7 @@ class SqliteRepository:
             adapter_type=adapter_type,
             workspace_path=workspace_path,
             idle_timeout_seconds=idle_timeout_seconds,
+            description=description,
             status=status,
             sandbox_id=sandbox_id,
             has_scheduled_tasks=has_scheduled_tasks,
@@ -104,6 +107,7 @@ class SqliteRepository:
         adapter_type: str,
         workspace_path: str,
         idle_timeout_seconds: int,
+        description: str = "",
         status: AgentStatus | str = AgentStatus.creating,
         sandbox_id: str | None = None,
         has_scheduled_tasks: bool = False,
@@ -113,6 +117,7 @@ class SqliteRepository:
             row = AgentORM(
                 id=agent_id,
                 name=name,
+                description=description,
                 sandbox_type=sandbox_type,
                 adapter_type=adapter_type,
                 status=self._serialize_status(status),
@@ -364,6 +369,7 @@ class SqliteRepository:
         return AgentRecord(
             id=row.id,
             name=row.name,
+            description=row.description,
             sandbox_type=row.sandbox_type,
             adapter_type=row.adapter_type,
             status=AgentStatus(row.status),
