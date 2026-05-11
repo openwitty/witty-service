@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 class CreateAgentRequest(BaseModel):
     name: str = Field(min_length=1)
-    description: str = ''
+    description: str = ""
     sandbox_type: str = Field(min_length=1)
     adapter_type: str = Field(min_length=1)
     idle_timeout_seconds: int = Field(gt=0)
@@ -63,7 +63,7 @@ class CreateModelRequest(BaseModel):
     provider: str = Field(min_length=1)
     api_key: str = Field(min_length=1)
     api_base_url: str | None = None
-    description: str = ''
+    description: str = ""
     enabled: bool = True
     max_tokens: int = 4096
     temperature: float = 0.7

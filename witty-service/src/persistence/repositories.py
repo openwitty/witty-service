@@ -77,10 +77,10 @@ class SandboxStateRecord:
     def handle(self) -> SandboxHandle:
         payload = dict(self.sandbox_payload_json)
         return SandboxHandle(
-            sandbox_id=str(payload['sandbox_id']),
-            agent_id=str(payload.get('agent_id', self.agent_id)),
-            workspace_path=str(payload['workspace_path']),
-            metadata=dict(payload.get('metadata', {})),
+            sandbox_id=str(payload["sandbox_id"]),
+            agent_id=str(payload.get("agent_id", self.agent_id)),
+            workspace_path=str(payload["workspace_path"]),
+            metadata=dict(payload.get("metadata", {})),
         )
 
 
@@ -111,7 +111,7 @@ class SqliteRepository:
         adapter_type: str,
         workspace_path: str,
         idle_timeout_seconds: int,
-        description: str = '',
+        description: str = "",
         status: AgentStatus | str = AgentStatus.creating,
         sandbox_id: str | None = None,
         has_scheduled_tasks: bool = False,
@@ -140,7 +140,7 @@ class SqliteRepository:
         adapter_type: str,
         workspace_path: str,
         idle_timeout_seconds: int,
-        description: str = '',
+        description: str = "",
         status: AgentStatus | str = AgentStatus.creating,
         sandbox_id: str | None = None,
         has_scheduled_tasks: bool = False,
@@ -191,7 +191,7 @@ class SqliteRepository:
         with self._session_factory() as session:
             row = session.get(AgentORM, agent_id)
             if row is None:
-                raise KeyError(f'Agent not found: {agent_id}')
+                raise KeyError(f"Agent not found: {agent_id}")
             row.status = self._serialize_status(status)
             if updated_at is not None:
                 row.updated_at = updated_at
@@ -355,7 +355,7 @@ class SqliteRepository:
 
         if last_error is not None:
             raise last_error
-        raise RuntimeError('Failed to create message event with retry.')
+        raise RuntimeError("Failed to create message event with retry.")
 
     def create_assistant_message_and_bind_events(
         self,
@@ -371,7 +371,7 @@ class SqliteRepository:
                 id=str(uuid4()),
                 agent_id=agent_id,
                 session_id=session_id,
-                role='assistant',
+                role="assistant",
                 content=content,
                 metadata_json=dict(metadata_json or {}),
             )
@@ -424,8 +424,8 @@ class SqliteRepository:
     def _is_message_event_seq_conflict(exc: IntegrityError) -> bool:
         message = str(exc.orig if exc.orig is not None else exc)
         return (
-            'uq_message_events_session_seq' in message
-            or 'message_events.session_id, message_events.seq_no' in message
+            "uq_message_events_session_seq" in message
+            or "message_events.session_id, message_events.seq_no" in message
         )
 
     def delete_agent(self, agent_id: str) -> None:
@@ -492,7 +492,7 @@ class SqliteRepository:
         provider: str,
         api_key: str,
         api_base_url: str | None = None,
-        description: str = '',
+        description: str = "",
         enabled: bool = True,
         max_tokens: int = 4096,
         temperature: float = 0.7,
@@ -519,7 +519,7 @@ class SqliteRepository:
         provider: str,
         api_key: str,
         api_base_url: str | None = None,
-        description: str = '',
+        description: str = "",
         enabled: bool = True,
         max_tokens: int = 4096,
         temperature: float = 0.7,
