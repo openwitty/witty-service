@@ -12,21 +12,64 @@
 - 消息接口：`/api/v1/agents/{agent_id}/sessions/{session_id}/messages`、`/api/v1/agents/{agent_id}/sessions/{session_id}/messages/stream`
 - 健康检查：`/healthz`
 
-## 1. 前置准备
+## 1. 开发环境设置
+
+### 1.1 创建虚拟环境（如果还没有）
 
 ```bash
-pip install -e ".[dev]"
+uv venv
+source .venv/bin/activate
+```
+
+### 1.2 安装依赖（包含开发依赖）
+
+```bash
+uv pip install -e ".[dev]"
+```
+
+### 1.3 启动开发服务器
+
+```bash
+uvicorn witty_service.main:create_app --host 0.0.0.0 --port 8000 --reload
 ```
 
 建议准备：
 - `curl`（HTTP 请求）
 - WebSocket 客户端（示例里使用 `websocket-client`）
 
-## 2. 启动服务
+## 2. 构建与部署
+
+### 2.1 构建 pip 包
 
 ```bash
-uv run uvicorn src.main:create_app --factory --host 0.0.0.0 --port 8000
+uv build
 ```
+
+构建产物会生成在 `dist/` 目录下：
+- `witty_service-0.1.0-py3-none-any.whl` - Wheel 包
+- `witty_service-0.1.0.tar.gz` - Source 包
+
+### 2.2 安装包
+
+```bash
+uv pip install dist/witty_service-0.1.0-py3-none-any.whl
+```
+
+### 2.3 生产环境启动
+
+```bash
+witty-service --host 0.0.0.0 --port 8000 --workers 4
+```
+
+### 2.4 启动参数说明
+
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| `--host` | 绑定的主机地址 | 127.0.0.1 |
+| `--port` | 绑定的端口 | 8000 |
+| `--log-level` | 日志级别 | info |
+| `--reload` | 开发模式自动重载 | False |
+| `--workers` | 工作进程数 | 1 |
 
 健康检查：
 
