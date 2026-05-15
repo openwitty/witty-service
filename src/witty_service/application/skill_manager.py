@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from urllib.parse import urlparse
-from uuid import uuid4
+from uuid import NAMESPACE_URL, uuid5
 from zipfile import ZipFile
 
 from witty_service.api.schemas import SkillRepositoryRequest
@@ -407,9 +407,10 @@ class SkillManager:
             relative_path = self._to_repository_relative_path(repo_root, skill_file)
             skill_source = repo.local_path if repo.source_type == SkillRepositorySourceType.LOCAL else repo.url
             skill_md_url = self._build_skill_md_url(repo, relative_path)
+            skill_id=self._build_deterministic_skill_id(repo.repo_id, relative_path)
             discovered.append(
                 SkillRecord(
-                    skill_id=str(uuid4()),
+                    skill_id=skill_id,
                     repo_id=repo.repo_id,
                     skill_name=self._derive_repository_skill_name(skill_file, metadata),
                     relative_path=relative_path,
@@ -421,6 +422,10 @@ class SkillManager:
                 )
             )
         return discovered
+
+    def _build_deterministic_skill_id(self, repo_id: str, relative_path: str) -> str:
+        unique_key = f'{repo_id}:{relative_path}'
+        return str(uuid5(NAMESPACE_URL, unique_key))
 
     def _load_skill_frontmatter(
         self, skill_file: Path
