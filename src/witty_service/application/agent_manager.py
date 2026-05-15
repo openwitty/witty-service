@@ -612,6 +612,22 @@ class AgentManager:
                 }
                 if event_dict["type"] == "message.completed":
                     break
+        except GeneratorExit:
+            self._logger.info(
+                "User aborted SSE stream: agent_id=%s session_id=%s — sending message.abort via WS",
+                agent_id,
+                session_id,
+            )
+            await self._handle_user_abort(ws_client, agent_id, session_id)
+            raise
+        except asyncio.CancelledError:
+            self._logger.info(
+                "SSE stream cancelled: agent_id=%s session_id=%s — sending message.abort via WS",
+                agent_id,
+                session_id,
+            )
+            await self._handle_user_abort(ws_client, agent_id, session_id)
+            raise
         except Exception:
             self._session_manager.upsert_session(
                 session_id=session_id,
@@ -619,6 +635,20 @@ class AgentManager:
                 status="error",
             )
             raise
+
+    async def _handle_user_abort(
+        self,
+        ws_client: WebSocketClient,
+        agent_id: str,
+        session_id: str,
+    ) -> None:
+        await ws_client.send({"type": "message.abort", "payload": {}})
+        self._logger.info(
+            "Sending message.abort via WS: agent_id=%s session_id=%s",
+            agent_id,
+            session_id,
+        )
+        await ws_client.disconnect()    
 
     async def create_session(
         self,
