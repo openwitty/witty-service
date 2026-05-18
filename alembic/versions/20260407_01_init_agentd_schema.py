@@ -137,9 +137,30 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("skill_id"),
         sa.UniqueConstraint("repo_id", "relative_path", name="uq_skills_repo_relative_path"),
     )
-
+    op.create_table(
+        "agent_skills",
+        sa.Column("agent_id", sa.String(length=36), nullable=False),
+        sa.Column("skill_id", sa.String(length=36), nullable=False),
+        sa.Column("source_type", sa.String(length=32), nullable=False),
+        sa.Column("repo_id", sa.String(length=36), nullable=True),
+        sa.Column("skill_name", sa.String(length=255), nullable=False),
+        sa.Column("installed_at", sa.DateTime(timezone=True), nullable=False),
+        sa.CheckConstraint(
+            "source_type IN ('builtin', 'git', 'local')",
+            name="ck_agent_skills_source_type",
+        ),
+        sa.CheckConstraint(
+            "(source_type = 'builtin' AND repo_id IS NULL) OR "
+            "(source_type IN ('git', 'local') AND repo_id IS NOT NULL)",
+            name="ck_agent_skills_repo_id_by_source",
+        ),
+        sa.ForeignKeyConstraint(["agent_id"], ["agents.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["repo_id"], ["skill_repo.repo_id"], ondelete="SET NULL"),
+        sa.PrimaryKeyConstraint("agent_id", "skill_id"),
+    )
 
 def downgrade() -> None:
+    op.drop_table("agent_skills")
     op.drop_table("skills")
     op.drop_table("skill_repo")
 

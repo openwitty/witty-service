@@ -94,6 +94,19 @@ def delete_skill_repository(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+@router.get('/repos/{repo_id}', response_model=SkillRepositoryResponse)
+def get_skill_repository(
+    repo_id: str,
+    services: ServiceContainer = Depends(get_services),
+) -> SkillRepositoryResponse:
+    service = _build_service(services)
+    try:
+        repository = service.get_repository_by_repo_id(repo_id)
+    except KeyError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    return _to_skill_repository_response(repository)
+
+
 @router.post('/discover', response_model=list[SkillRepositoryResponse])
 def discover_skill_repositories(
     services: ServiceContainer = Depends(get_services),

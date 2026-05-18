@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from witty_service.domain.enums import AgentStatus
 from witty_service.persistence.orm import (
     AgentORM,
+    AgentSkillORM,
     AgentRuntimeStateORM,
     MessageEventORM,
     MessageORM,
@@ -110,6 +111,20 @@ class SkillRecord:
     skill_md_url: str | None
     created_at: datetime
     updated_at: datetime
+
+
+@dataclass(slots=True)
+class AgentSkillRecord:
+    agent_id: str
+    skill_id: str
+    source_type: str
+    repo_id: str | None
+    skill_name: str
+    installed_at: datetime
+    relative_path: str | None = None
+    metadata: dict[str, Any] | None = None
+    skill_source: str | None = None
+    skill_md_url: str | None = None
 
 
 class SqliteRepository:
@@ -711,6 +726,98 @@ class SqliteRepository:
 
             session.commit()
 
+    def upsert_builtin_skill(
+        self,
+        *,
+        skill_id: str,
+        skill_name: str,
+        metadata: dict[str, Any],
+        skill_source: str | None = None,
+        relative_path: str | None = None,
+    ) -> SkillRecord:
+        with self._session_factory() as session:
+            row = session.get(SkillORM, skill_id)
+            if row is None:
+                row = SkillORM(
+                    skill_id=skill_id,
+                    repo_id=None,
+                    skill_name=skill_name,
+                    relative_path=relative_path,
+                    metadata_json=dict(metadata),
+                    skill_source=skill_source,
+                    skill_md_url=None,
+                )
+                session.add(row)
+            else:
+                row.repo_id = None
+                row.skill_name = skill_name
+                row.relative_path = relative_path
+                row.metadata_json = dict(metadata)
+                row.skill_source = skill_source
+                row.skill_md_url = None
+            session.commit()
+            session.refresh(row)
+            return self._to_skill_record(row)
+
+    def upsert_installed_agent_skill(
+        self,
+        *,
+        agent_id: str,
+        skill_id: str,
+        source_type: str,
+        skill_name: str,
+        repo_id: str | None = None,
+        installed_at: datetime | None = None,
+    ) -> AgentSkillRecord:
+        with self._session_factory() as session:
+            row = session.get(AgentSkillORM, (agent_id, skill_id))
+            timestamp = installed_at or datetime.now(timezone.utc)
+            if row is None:
+                row = AgentSkillORM(
+                    agent_id=agent_id,
+                    skill_id=skill_id,
+                    source_type=source_type,
+                    repo_id=repo_id,
+                    skill_name=skill_name,
+                    installed_at=timestamp,
+                )
+                session.add(row)
+            else:
+                row.source_type = source_type
+                row.repo_id = repo_id
+                row.skill_name = skill_name
+                row.installed_at = timestamp
+            session.commit()
+            session.refresh(row)
+            return self._to_agent_skill_record(row)
+
+    def list_installed_agent_skills(self, agent_id: str) -> list[AgentSkillRecord]:
+        with self._session_factory() as session:
+            rows = (
+                session.query(AgentSkillORM, SkillORM)
+                .outerjoin(SkillORM, AgentSkillORM.skill_id == SkillORM.skill_id)
+                .filter(AgentSkillORM.agent_id == agent_id)
+                .order_by(AgentSkillORM.installed_at.asc(), AgentSkillORM.skill_name.asc())
+                .all()
+            )
+            return [
+                self._to_agent_skill_record(agent_skill_row, skill_row)
+                for agent_skill_row, skill_row in rows
+            ]
+
+    def delete_installed_agent_skill(self, *, agent_id: str, skill_id: str) -> None:
+        with self._session_factory() as session:
+            row = session.get(AgentSkillORM, (agent_id, skill_id))
+            is_buildin_skill = row is not None and row.source_type == 'builtin'
+            if row is None:
+                return
+            session.delete(row)
+            session.flush()
+            if is_buildin_skill:
+                skill_row = session.get(SkillORM, skill_id)
+                session.delete(skill_row)
+            session.commit()
+
     @staticmethod
     def _to_skill_repository_record(row: SkillRepositoryORM) -> SkillRepositoryRecord:
         return SkillRepositoryRecord(
@@ -738,4 +845,22 @@ class SqliteRepository:
             skill_md_url=row.skill_md_url,
             created_at=row.created_at,
             updated_at=row.updated_at,
+        )
+
+    @staticmethod
+    def _to_agent_skill_record(
+        row: AgentSkillORM,
+        skill_row: SkillORM | None = None,
+    ) -> AgentSkillRecord:
+        return AgentSkillRecord(
+            agent_id=row.agent_id,
+            skill_id=row.skill_id,
+            source_type=row.source_type,
+            repo_id=row.repo_id,
+            skill_name=row.skill_name,
+            installed_at=row.installed_at,
+            relative_path=skill_row.relative_path if skill_row is not None else None,
+            metadata=dict(skill_row.metadata_json or {}) if skill_row is not None else None,
+            skill_source=skill_row.skill_source if skill_row is not None else None,
+            skill_md_url=skill_row.skill_md_url if skill_row is not None else None,
         )
