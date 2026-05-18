@@ -6,6 +6,7 @@ from typing import Any
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     DateTime,
     Enum as SQLEnum,
     ForeignKey,
@@ -268,4 +269,38 @@ class SkillORM(Base):
         nullable=False,
         default=utcnow,
         onupdate=utcnow,
+    )
+
+
+class AgentSkillORM(Base):
+    __tablename__ = 'agent_skills'
+    __table_args__ = (
+        CheckConstraint(
+            "source_type IN ('builtin', 'git', 'local')",
+            name='ck_agent_skills_source_type',
+        ),
+        CheckConstraint(
+            "(source_type = 'builtin' AND repo_id IS NULL) OR "
+            "(source_type IN ('git', 'local') AND repo_id IS NOT NULL)",
+            name='ck_agent_skills_repo_id_by_source',
+        ),
+    )
+
+    agent_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey('agents.id', ondelete='CASCADE'),
+        primary_key=True,
+    )
+    skill_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    source_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    repo_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey('skill_repo.repo_id', ondelete='SET NULL'),
+        nullable=True,
+    )
+    skill_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    installed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=utcnow,
     )

@@ -10,6 +10,7 @@ from fastapi.responses import StreamingResponse
 from witty_service.api.auth import require_bearer_auth
 from witty_service.api.schemas import (
     AgentResponse,
+    AgentSkillResponse,
     CreateAgentRequest,
     MessageEventsResponse,
     SendMessageRequest,
@@ -270,6 +271,37 @@ async def send_message_stream(
                 break
 
     return StreamingResponse(stream(), media_type="text/event-stream")
+
+@router.get("/{agent_id}/skills/installed", response_model=list[AgentSkillResponse])
+def list_installed_agent_skills(
+    agent_id: str,
+    services: ServiceContainer = Depends(get_services),
+) -> list[AgentSkillResponse]:
+    """查询指定 agent 已安装的技能记录。"""
+    agent = services.repository.get_agent(agent_id)
+    if agent is None:
+        raise DomainError(
+            code=AGENT_NOT_FOUND,
+            message="Agent was not found.",
+            details={"agent_id": agent_id},
+        )
+
+    records = services.repository.list_installed_agent_skills(agent_id)
+    return [
+        AgentSkillResponse(
+            agent_id=item.agent_id,
+            skill_id=item.skill_id,
+            source_type=item.source_type,
+            repo_id=item.repo_id,
+            skill_name=item.skill_name,
+            installed_at=item.installed_at,
+            relative_path=item.relative_path,
+            metadata=item.metadata,
+            skill_source=item.skill_source,
+            skill_md_url=item.skill_md_url,
+        )
+        for item in records
+    ]
 
 
 def _to_agent_response(

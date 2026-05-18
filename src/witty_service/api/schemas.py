@@ -20,6 +20,19 @@ class SendMessageRequest(BaseModel):
     content: str = Field(min_length=1)
 
 
+class AgentSkillResponse(BaseModel):
+    agent_id: str
+    skill_id: str
+    source_type: str
+    repo_id: str | None
+    skill_name: str
+    installed_at: datetime
+    relative_path: str | None = None
+    metadata: dict[str, Any] | None = None
+    skill_source: str | None = None
+    skill_md_url: str | None = None
+
+
 class AgentResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -109,6 +122,11 @@ class SessionEventsResponse(BaseModel):
     items: list[SessionEventItem]
     pagination: PaginationInfo
 
+class SkillSourceType:
+    GIT = 'git'
+    LOCAL = 'local'
+    BUILDIN = 'builtin'
+
 
 class SkillRepositoryRequest(BaseModel):
     source_type: str | None = None
@@ -134,7 +152,7 @@ class SkillResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     skill_id: str
-    repo_id: str
+    repo_id: str | None
     skill_name: str
     relative_path: str | None
     metadata: dict[str, Any]

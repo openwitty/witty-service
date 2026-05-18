@@ -9,7 +9,7 @@ from datetime import datetime
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, AsyncIterator, Callable, Protocol
-from uuid import uuid4
+from uuid import NAMESPACE_URL, uuid4, uuid5
 
 
 logger = logging.getLogger(__name__)
@@ -110,6 +110,27 @@ class AgentRepository(Protocol):
 
     def delete_agent(self, agent_id: str) -> None: ...
 
+    def upsert_builtin_skill(
+        self,
+        *,
+        skill_id: str,
+        skill_name: str,
+        metadata: dict[str, Any],
+        skill_source: str | None = None,
+        relative_path: str | None = None,
+    ) -> Any: ...
+
+    def upsert_installed_agent_skill(
+        self,
+        *,
+        agent_id: str,
+        skill_id: str,
+        source_type: str,
+        skill_name: str,
+        repo_id: str | None = None,
+        installed_at: datetime | None = None,
+    ) -> Any: ...
+
 
 class WorkspaceStore(Protocol):
     def init_workspace(self, agent_id: str) -> Path: ...
@@ -169,14 +190,55 @@ class AgentManager:
                 )
                 return []
 
-            self._logger.info("Listed agent skills successfully: agent_id=%s skill_count=%s", agent_id, len(skills))
-            return [item for item in skills if isinstance(item, dict)]
+            builtin_skills = [item for item in skills if isinstance(item, dict)]
+            try:
+                self._sync_builtin_skills(agent_id, builtin_skills)
+            except Exception:
+                self._logger.warning(
+                    "Failed to sync builtin skills into DB: agent_id=%s",
+                    agent_id,
+                    exc_info=True,
+                )
+
+            self._logger.info("Listed agent skills successfully: agent_id=%s skill_count=%s", agent_id, len(builtin_skills))
+            return builtin_skills
         except Exception:
             self._logger.exception("Failed to list agent skills: agent_id=%s", agent_id)
             raise
         finally:
             if client is not None:
                 client.close()
+
+    def _sync_builtin_skills(self, agent_id: str, skills: list[dict[str, Any]]) -> None:
+        for item in skills:
+            skill_name = item.get("name")
+            if not isinstance(skill_name, str) or not skill_name.strip():
+                continue
+
+            normalized_name = skill_name.strip()
+            skill_source = item.get("source")
+            source_value = skill_source if isinstance(skill_source, str) else None
+            file_path = item.get("filePath")
+            relative_path = file_path if isinstance(file_path, str) else None
+            skill_id = self._build_builtin_skill_id(agent_id, normalized_name)
+
+            self._repository.upsert_builtin_skill(
+                skill_id=skill_id,
+                skill_name=normalized_name,
+                metadata=dict(item),
+                skill_source=source_value,
+                relative_path=relative_path,
+            )
+            self._repository.upsert_installed_agent_skill(
+                agent_id=agent_id,
+                skill_id=skill_id,
+                source_type='builtin',
+                repo_id=None,
+                skill_name=normalized_name,
+            )
+
+    def _build_builtin_skill_id(self, agent_id: str, skill_name: str) -> str:
+        return str(uuid5(NAMESPACE_URL, f"builtin:{agent_id}:{skill_name}"))
 
     def create_agent(self, request: AgentCreateRequest) -> AgentCreateResult:
         agent_id = str(uuid4())

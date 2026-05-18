@@ -13,17 +13,12 @@ from urllib.parse import urlparse
 from uuid import NAMESPACE_URL, uuid5
 from zipfile import ZipFile
 
-from witty_service.api.schemas import SkillRepositoryRequest
+from witty_service.api.schemas import SkillRepositoryRequest, SkillSourceType
 from witty_service.persistence.repositories import SkillRepositoryRecord, SkillRecord, SqliteRepository
 
 _logger = logging.getLogger(__name__)
 GIT_CLONE_RETRY_TIMES = 3
 LOCAL_ARCHIVE_BASE_DIR = Path('/tmp/witty-service-skill-repo-archives')
-
-
-class SkillRepositorySourceType:
-    GIT = 'git'
-    LOCAL = 'local'
 
 
 class SkillDiscoverStatus:
@@ -64,7 +59,7 @@ class SkillManager:
         repo_id: str,
         request: SkillRepositoryRequest,
     ) -> SkillRepositoryRecord:
-        stored = self._get_owned_repo(repo_id)
+        stored = self.get_repository_by_repo_id(repo_id)
         source_type = request.source_type or stored.source_type
         branch = request.branch.strip() if request.branch is not None else stored.branch
         url = (
@@ -93,6 +88,12 @@ class SkillManager:
 
     def delete_skill_repository(self, repo_id: str) -> None:
         self.repository.delete_skill_repository(repo_id)
+
+    def get_repository_by_repo_id(self, repo_id: str) -> SkillRepositoryRecord:
+        repository = self.repository.get_skill_repository(repo_id)
+        if repository is None:
+            raise KeyError(f'Skill repository {repo_id} not found')
+        return repository
 
     def discover_skill_repositories(self) -> list[SkillRepositoryRecord]:
         updated_repositories: list[SkillRepositoryRecord] = []
@@ -126,7 +127,7 @@ class SkillManager:
         return updated_repositories
 
     def discover_one_skill_repository(self, repo_id: str) -> SkillRepositoryRecord:
-        repository = self._get_owned_repo(repo_id)
+        repository = self.get_repository_by_repo_id(repo_id)
         if repository.skill_discover_status == SkillDiscoverStatus.DISCOVERING:
             raise ValueError('Skill repository discovery is already in progress')
 
@@ -165,12 +166,6 @@ class SkillManager:
             _logger.warning(
                 'Background discover failed for repository %s: %s', repo_id, exc
             )
-
-    def _get_owned_repo(self, repo_id: str) -> SkillRepositoryRecord:
-        repository = self.repository.get_skill_repository(repo_id)
-        if repository is None:
-            raise KeyError(f'Skill repository {repo_id} not found')
-        return repository
 
     def _set_discovery_status(self, repo: SkillRepositoryRecord, status: str) -> None:
         self.repository.update_skill_repository(
@@ -230,7 +225,7 @@ class SkillManager:
         if request.source_type is None:
             raise ValueError('source_type is required')
 
-        if request.source_type == SkillRepositorySourceType.GIT:
+        if request.source_type == SkillSourceType.GIT:
             if not request.url:
                 raise ValueError('git skill repositories require url')
             normalized_url = request.url.removesuffix('.git')
@@ -255,11 +250,11 @@ class SkillManager:
         url: str | None,
         local_path: str | None,
     ) -> None:
-        if source_type == SkillRepositorySourceType.GIT:
+        if source_type == SkillSourceType.GIT:
             if not url:
                 raise ValueError('git skill repositories require url')
             return
-        if source_type == SkillRepositorySourceType.LOCAL:
+        if source_type == SkillSourceType.LOCAL:
             if not local_path:
                 raise ValueError('local skill repositories require local_path')
             return
@@ -268,7 +263,7 @@ class SkillManager:
     def _discover_skill_repository_skills(
         self, repo: SkillRepositoryRecord
     ) -> list[SkillRecord]:
-        if repo.source_type == SkillRepositorySourceType.LOCAL:
+        if repo.source_type == SkillSourceType.LOCAL:
             return self._discover_local_skill_repository_skills(repo)
         return self._discover_git_skill_repository_skills(repo)
 
@@ -405,7 +400,7 @@ class SkillManager:
         for skill_file in skill_files:
             metadata, _ = self._load_skill_frontmatter(skill_file)
             relative_path = self._to_repository_relative_path(repo_root, skill_file)
-            skill_source = repo.local_path if repo.source_type == SkillRepositorySourceType.LOCAL else repo.url
+            skill_source = repo.local_path if repo.source_type == SkillSourceType.LOCAL else repo.url
             skill_md_url = self._build_skill_md_url(repo, relative_path)
             skill_id=self._build_deterministic_skill_id(repo.repo_id, relative_path)
             discovered.append(
@@ -510,7 +505,7 @@ class SkillManager:
         repo: SkillRepositoryRecord,
         relative_path: str,
     ) -> str | None:
-        if repo.source_type == SkillRepositorySourceType.LOCAL:
+        if repo.source_type == SkillSourceType.LOCAL:
             return relative_path
 
         if not repo.url:
