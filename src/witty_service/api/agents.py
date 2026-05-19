@@ -259,17 +259,23 @@ async def send_message_stream(
     first_event = await _prefetch_first_event(event_stream)
 
     async def stream() -> AsyncIterator[str]:
-        if first_event is None:
-            return
+        try:
+            if first_event is None:
+                return
+    
+            yield _format_sse_data(first_event)
+            if first_event["event"]["type"] in {"message.completed", "turn.completed"}:
+                return
 
-        yield _format_sse_data(first_event)
-        if first_event["event"]["type"] in {"message.completed", "turn.completed"}:
-            return
-
-        async for event in event_stream:
-            yield _format_sse_data(event)
-            if event["event"]["type"] in {"message.completed", "turn.completed"}:
-                break
+            async for event in event_stream:
+                yield _format_sse_data(event)
+                if event["event"]["type"] in {"message.completed", "turn.completed"}:
+                    return
+                        
+        except (GeneratorExit, asyncio.CancelledError): 
+            if hasattr(event_stream, "aclose"): 
+                await event_stream.aclose() 
+            raise
 
     return StreamingResponse(stream(), media_type="text/event-stream")
 
