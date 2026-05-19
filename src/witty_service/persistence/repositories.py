@@ -812,6 +812,103 @@ class SqliteRepository:
             session.refresh(row)
             return self._to_agent_skill_record(row)
 
+    def replace_installed_agent_skills_from_runtime(
+        self,
+        *,
+        agent_id: str,
+        skills: list[dict[str, Any]],
+    ) -> None:
+        """Replace one agent's installed skills from runtime snapshot in a single transaction."""
+        with self._session_factory() as session:
+            timestamp = datetime.now(timezone.utc)
+            normalized_skills: list[dict[str, Any]] = []
+            seen_names: set[str] = set()
+            for item in skills:
+                if not isinstance(item, dict):
+                    continue
+                raw_name = item.get("name")
+                if not isinstance(raw_name, str):
+                    continue
+                skill_name = raw_name.strip()
+                if not skill_name or skill_name in seen_names:
+                    continue
+                seen_names.add(skill_name)
+                normalized_skills.append(
+                    {
+                        "skill_id": str(uuid5(NAMESPACE_URL, f"builtin:{agent_id}:{skill_name}")),
+                        "skill_name": skill_name,
+                        "metadata": dict(item),
+                        "skill_source": item.get("source")
+                        if isinstance(item.get("source"), str)
+                        else None,
+                        "relative_path": item.get("filePath")
+                        if isinstance(item.get("filePath"), str)
+                        else None,
+                    }
+                )
+
+            previous_builtin_skill_ids = [
+                skill_id
+                for (skill_id,) in (
+                    session.query(AgentSkillORM.skill_id)
+                    .filter(
+                        AgentSkillORM.agent_id == agent_id,
+                        AgentSkillORM.source_type == 'builtin',
+                    )
+                    .all()
+                )
+            ]
+
+            session.query(AgentSkillORM).filter(AgentSkillORM.agent_id == agent_id).delete(
+                synchronize_session=False
+            )
+
+            next_builtin_skill_ids = {item["skill_id"] for item in normalized_skills}
+            obsolete_builtin_ids = [
+                skill_id
+                for skill_id in previous_builtin_skill_ids
+                if skill_id not in next_builtin_skill_ids
+            ]
+            if obsolete_builtin_ids:
+                session.query(SkillORM).filter(SkillORM.skill_id.in_(obsolete_builtin_ids)).delete(
+                    synchronize_session=False
+                )
+
+            for item in normalized_skills:
+                skill_row = session.get(SkillORM, item["skill_id"])
+                if skill_row is None:
+                    skill_row = SkillORM(
+                        skill_id=item["skill_id"],
+                        repo_id=None,
+                        skill_name=item["skill_name"],
+                        relative_path=item["relative_path"],
+                        metadata_json=item["metadata"],
+                        skill_source=item["skill_source"],
+                        skill_md_url=None,
+                    )
+                    session.add(skill_row)
+                else:
+                    skill_row.repo_id = None
+                    skill_row.skill_name = item["skill_name"]
+                    skill_row.relative_path = item["relative_path"]
+                    skill_row.metadata_json = item["metadata"]
+                    skill_row.skill_source = item["skill_source"]
+                    skill_row.skill_md_url = None
+                    skill_row.updated_at = timestamp
+
+                session.add(
+                    AgentSkillORM(
+                        agent_id=agent_id,
+                        skill_id=item["skill_id"],
+                        source_type='builtin',
+                        repo_id=None,
+                        skill_name=item["skill_name"],
+                        installed_at=timestamp,
+                    )
+                )
+
+            session.commit()
+
     def list_installed_agent_skills(self, agent_id: str) -> list[AgentSkillRecord]:
         with self._session_factory() as session:
             rows = (
@@ -826,17 +923,40 @@ class SqliteRepository:
                 for agent_skill_row, skill_row in rows
             ]
 
+    def get_installed_agent_skill(
+        self,
+        *,
+        agent_id: str,
+        skill_id: str,
+    ) -> AgentSkillRecord | None:
+        with self._session_factory() as session:
+            row = (
+                session.query(AgentSkillORM, SkillORM)
+                .outerjoin(SkillORM, AgentSkillORM.skill_id == SkillORM.skill_id)
+                .filter(
+                    AgentSkillORM.agent_id == agent_id,
+                    AgentSkillORM.skill_id == skill_id,
+                )
+                .one_or_none()
+            )
+            if row is None:
+                return None
+            agent_skill_row, skill_row = row
+            return self._to_agent_skill_record(agent_skill_row, skill_row)
+
     def delete_installed_agent_skill(self, *, agent_id: str, skill_id: str) -> None:
         with self._session_factory() as session:
             row = session.get(AgentSkillORM, (agent_id, skill_id))
-            is_buildin_skill = row is not None and row.source_type == 'builtin'
+            is_builtin_skill = row is not None and row.source_type == 'builtin'
             if row is None:
                 return
             session.delete(row)
             session.flush()
-            if is_buildin_skill:
+            if is_builtin_skill:
+                # 只有builtin的skill，需要同 skills 表里的那条 builtin skill 元数据一起清理
                 skill_row = session.get(SkillORM, skill_id)
-                session.delete(skill_row)
+                if skill_row is not None:
+                    session.delete(skill_row)
             session.commit()
 
     @staticmethod

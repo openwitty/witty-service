@@ -137,6 +137,13 @@ class AgentRepository(Protocol):
         installed_at: datetime | None = None,
     ) -> Any: ...
 
+    def replace_installed_agent_skills_from_runtime(
+        self,
+        *,
+        agent_id: str,
+        skills: list[dict[str, Any]],
+    ) -> None: ...
+
 
 class WorkspaceStore(Protocol):
     def init_workspace(self, agent_id: str) -> Path: ...
@@ -173,8 +180,44 @@ class AgentManager:
 
     def list_agent_skills(self, agent_id: str) -> list[dict[str, Any]]:
         """查询当前 agent 对应 runtime 支持的 skills。"""
+        builtin_skills = self._fetch_agent_skills_from_runtime(agent_id)
+        try:
+            self._sync_builtin_skills(agent_id, builtin_skills)
+        except Exception:
+            self._logger.warning(
+                "Failed to sync builtin skills into DB: agent_id=%s",
+                agent_id,
+                exc_info=True,
+            )
+        self._logger.info(
+            "Listed agent skills successfully: agent_id=%s skill_count=%s",
+            agent_id,
+            len(builtin_skills),
+        )
+        return builtin_skills
+
+    def sync_installed_agent_skills(self, agent_id: str) -> list[dict[str, Any]]:
+        """Fetch installed skills from runtime and replace DB records in one transaction."""
+        builtin_skills = self._fetch_agent_skills_from_runtime(agent_id)
+        self._repository.replace_installed_agent_skills_from_runtime(
+            agent_id=agent_id,
+            skills=builtin_skills,
+        )
+        self._logger.info(
+            "Synced installed skills successfully: agent_id=%s skill_count=%s",
+            agent_id,
+            len(builtin_skills),
+        )
+        return builtin_skills
+
+    def _fetch_agent_skills_from_runtime(self, agent_id: str) -> list[dict[str, Any]]:
+        """Fetch current runtime-visible skills for one agent."""
         sandbox_state = self._get_sandbox_state(agent_id)
-        self._logger.info("Listing agent skills: agent_id=%s base_url=%s", agent_id, sandbox_state.adapter_base_url)
+        self._logger.info(
+            "Listing agent skills: agent_id=%s base_url=%s",
+            agent_id,
+            sandbox_state.adapter_base_url,
+        )
 
         client: httpx.Client | None = None
         try:
@@ -196,18 +239,7 @@ class AgentManager:
                 )
                 return []
 
-            builtin_skills = [item for item in skills if isinstance(item, dict)]
-            try:
-                self._sync_builtin_skills(agent_id, builtin_skills)
-            except Exception:
-                self._logger.warning(
-                    "Failed to sync builtin skills into DB: agent_id=%s",
-                    agent_id,
-                    exc_info=True,
-                )
-
-            self._logger.info("Listed agent skills successfully: agent_id=%s skill_count=%s", agent_id, len(builtin_skills))
-            return builtin_skills
+            return [item for item in skills if isinstance(item, dict)]
         except Exception:
             self._logger.exception("Failed to list agent skills: agent_id=%s", agent_id)
             raise

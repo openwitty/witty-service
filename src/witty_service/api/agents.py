@@ -349,6 +349,26 @@ def list_installed_agent_skills(
     return [_to_agent_skill_response(item) for item in records]
 
 
+@router.post("/{agent_id}/skills/installed/sync", response_model=list[AgentSkillResponse])
+def sync_installed_agent_skills(
+    agent_id: str,
+    services: ServiceContainer = Depends(get_services),
+) -> list[AgentSkillResponse]:
+    """主动从 runtime 拉取并同步已安装技能，然后返回最新列表。"""
+    manager = services.get_agent_manager_for_agent(agent_id)
+    try:
+        manager.sync_installed_agent_skills(agent_id)
+    except Exception as exc:
+        raise DomainError(
+            code=SKILL_SYNC_FAILED,
+            message="Failed to sync installed skills from runtime.",
+            details={"agent_id": agent_id, "error": str(exc)},
+        ) from exc
+
+    records = services.repository.list_installed_agent_skills(agent_id)
+    return [_to_agent_skill_response(item) for item in records]
+
+
 @router.post("/{agent_id}/skills/uninstall", response_model=AgentSkillResponse)
 async def uninstall_agent_skill(
     agent_id: str,
