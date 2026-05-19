@@ -704,16 +704,6 @@ class SqliteRepository:
             session.delete(row)
             session.commit()
 
-    def get_skills_by_repo_id(self, repo_id: str) -> list[SkillRecord]:
-        with self._session_factory() as session:
-            rows = (
-                session.query(SkillORM)
-                .filter(SkillORM.repo_id == repo_id)
-                .order_by(SkillORM.created_at.asc(), SkillORM.skill_name.asc())
-                .all()
-            )
-            return [self._to_skill_record(row) for row in rows]
-
     def get_skill_by_skill_id(self, skill_id: str) -> SkillRecord | None:
         with self._session_factory() as session:
             row = (
