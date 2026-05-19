@@ -20,6 +20,15 @@ class SendMessageRequest(BaseModel):
     content: str = Field(min_length=1)
 
 
+class InstallAgentSkillRequest(BaseModel):
+    skill_id: str = Field(min_length=1)
+    skill_name: str = Field(min_length=1)
+
+
+class UninstallAgentSkillRequest(BaseModel):
+    skill_id: str = Field(min_length=1)
+
+
 class AgentSkillResponse(BaseModel):
     agent_id: str
     skill_id: str

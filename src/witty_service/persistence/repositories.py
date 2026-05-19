@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
-from uuid import uuid4
+from uuid import NAMESPACE_URL, uuid4, uuid5
 
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
@@ -687,6 +687,27 @@ class SqliteRepository:
                 return
             session.delete(row)
             session.commit()
+
+    def get_skills_by_repo_id(self, repo_id: str) -> list[SkillRecord]:
+        with self._session_factory() as session:
+            rows = (
+                session.query(SkillORM)
+                .filter(SkillORM.repo_id == repo_id)
+                .order_by(SkillORM.created_at.asc(), SkillORM.skill_name.asc())
+                .all()
+            )
+            return [self._to_skill_record(row) for row in rows]
+
+    def get_skill_by_skill_id(self, skill_id: str) -> SkillRecord | None:
+        with self._session_factory() as session:
+            row = (
+                session.query(SkillORM)
+                .filter(SkillORM.skill_id == skill_id)
+                .one_or_none()
+            )
+            if row is None:
+                return None
+            return self._to_skill_record(row)
 
     def list_skills(self) -> list[SkillRecord]:
         with self._session_factory() as session:
