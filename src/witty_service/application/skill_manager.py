@@ -191,6 +191,9 @@ class SkillManager:
             )
             raise
 
+    def get_skill_by_skill_id(self, skill_id: str) -> SkillRecord | None:
+        return self.repository.get_skill_by_skill_id(skill_id)
+
     def list_skills(self) -> list[SkillRecord]:
         return self.repository.list_skills()
 

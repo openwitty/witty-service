@@ -37,6 +37,12 @@ AGENT_DELETE_FAILED = "AGENT_DELETE_FAILED"
 RUNTIME_BACKUP_NOT_FOUND = "RUNTIME_BACKUP_NOT_FOUND"
 SANDBOX_NOT_READY = "SANDBOX_NOT_READY"
 RUNTIME_START_FAILED = "RUNTIME_START_FAILED"
+SKILL_NOT_FOUND = "SKILL_NOT_FOUND"
+SKILL_INSTALL_RECORD_FAILED = "SKILL_INSTALL_RECORD_FAILED"
+SKILL_UNINSTALL_RECORD_FAILED = "SKILL_UNINSTALL_RECORD_FAILED"
+SKILL_SYNC_FAILED = "SKILL_SYNC_FAILED"
+AGENT_SKILL_INSTALL_FAILED = "AGENT_SKILL_INSTALL_FAILED"
+AGENT_SKILL_UNINSTALL_FAILED = "AGENT_SKILL_UNINSTALL_FAILED"
 
 
 @dataclass(slots=True, frozen=True)
@@ -131,6 +137,13 @@ class AgentRepository(Protocol):
         installed_at: datetime | None = None,
     ) -> Any: ...
 
+    def replace_installed_agent_skills_from_runtime(
+        self,
+        *,
+        agent_id: str,
+        skills: list[dict[str, Any]],
+    ) -> None: ...
+
 
 class WorkspaceStore(Protocol):
     def init_workspace(self, agent_id: str) -> Path: ...
@@ -167,8 +180,44 @@ class AgentManager:
 
     def list_agent_skills(self, agent_id: str) -> list[dict[str, Any]]:
         """查询当前 agent 对应 runtime 支持的 skills。"""
+        builtin_skills = self._fetch_agent_skills_from_runtime(agent_id)
+        try:
+            self._sync_builtin_skills(agent_id, builtin_skills)
+        except Exception:
+            self._logger.warning(
+                "Failed to sync builtin skills into DB: agent_id=%s",
+                agent_id,
+                exc_info=True,
+            )
+        self._logger.info(
+            "Listed agent skills successfully: agent_id=%s skill_count=%s",
+            agent_id,
+            len(builtin_skills),
+        )
+        return builtin_skills
+
+    def sync_installed_agent_skills(self, agent_id: str) -> list[dict[str, Any]]:
+        """Fetch installed skills from runtime and replace DB records in one transaction."""
+        builtin_skills = self._fetch_agent_skills_from_runtime(agent_id)
+        self._repository.replace_installed_agent_skills_from_runtime(
+            agent_id=agent_id,
+            skills=builtin_skills,
+        )
+        self._logger.info(
+            "Synced installed skills successfully: agent_id=%s skill_count=%s",
+            agent_id,
+            len(builtin_skills),
+        )
+        return builtin_skills
+
+    def _fetch_agent_skills_from_runtime(self, agent_id: str) -> list[dict[str, Any]]:
+        """Fetch current runtime-visible skills for one agent."""
         sandbox_state = self._get_sandbox_state(agent_id)
-        self._logger.info("Listing agent skills: agent_id=%s base_url=%s", agent_id, sandbox_state.adapter_base_url)
+        self._logger.info(
+            "Listing agent skills: agent_id=%s base_url=%s",
+            agent_id,
+            sandbox_state.adapter_base_url,
+        )
 
         client: httpx.Client | None = None
         try:
@@ -190,18 +239,7 @@ class AgentManager:
                 )
                 return []
 
-            builtin_skills = [item for item in skills if isinstance(item, dict)]
-            try:
-                self._sync_builtin_skills(agent_id, builtin_skills)
-            except Exception:
-                self._logger.warning(
-                    "Failed to sync builtin skills into DB: agent_id=%s",
-                    agent_id,
-                    exc_info=True,
-                )
-
-            self._logger.info("Listed agent skills successfully: agent_id=%s skill_count=%s", agent_id, len(builtin_skills))
-            return builtin_skills
+            return [item for item in skills if isinstance(item, dict)]
         except Exception:
             self._logger.exception("Failed to list agent skills: agent_id=%s", agent_id)
             raise
@@ -239,6 +277,82 @@ class AgentManager:
 
     def _build_builtin_skill_id(self, agent_id: str, skill_name: str) -> str:
         return str(uuid5(NAMESPACE_URL, f"builtin:{agent_id}:{skill_name}"))
+
+    async def install_agent_skill(self, agent_id: str, skill_name: str,) -> dict[str, Any]:
+        """下发 skill 到 runtime。"""
+        agent = self._get_agent(agent_id)
+
+        if agent.status is AgentStatus.paused:
+            agent = await self.resume_agent(agent_id)
+        elif agent.status is not AgentStatus.running:
+            raise DomainError(
+                code=AGENT_NOT_RUNNING,
+                message="Agent must be running to install skills.",
+                details={"agent_id": agent_id, "status": agent.status.value},
+            )
+
+        adaptor_client = self._get_adaptor_http_client(agent_id)
+        try:
+            try:
+                payload = await adaptor_client.post(
+                    "/agent/skills/install",
+                    json={
+                        "skill_name": skill_name,
+                    },
+                )
+            except httpx.HTTPError as exc:
+                raise DomainError(
+                    code=AGENT_SKILL_INSTALL_FAILED,
+                    message="Failed to install skill on runtime.",
+                    details={
+                        "agent_id": agent_id,
+                        "skill_name": skill_name,
+                        "error": str(exc),
+                    },
+                ) from exc
+        finally:
+            await adaptor_client.close()
+
+        if not isinstance(payload, dict):
+            return {"status": "accepted"}
+        return payload
+
+    async def uninstall_agent_skill(self, agent_id: str, skill_name: str) -> dict[str, Any]:
+        """从 runtime 卸载 skill。"""
+        agent = self._get_agent(agent_id)
+
+        if agent.status is AgentStatus.paused:
+            agent = await self.resume_agent(agent_id)
+        elif agent.status is not AgentStatus.running:
+            raise DomainError(
+                code=AGENT_NOT_RUNNING,
+                message="Agent must be running to uninstall skills.",
+                details={"agent_id": agent_id, "status": agent.status.value},
+            )
+
+        adaptor_client = self._get_adaptor_http_client(agent_id)
+        try:
+            try:
+                payload = await adaptor_client.post(
+                    "/agent/skills/uninstall",
+                    json={"skill_name": skill_name},
+                )
+            except httpx.HTTPError as exc:
+                raise DomainError(
+                    code=AGENT_SKILL_UNINSTALL_FAILED,
+                    message="Failed to uninstall skill on runtime.",
+                    details={
+                        "agent_id": agent_id,
+                        "skill_name": skill_name,
+                        "error": str(exc),
+                    },
+                ) from exc
+        finally:
+            await adaptor_client.close()
+
+        if not isinstance(payload, dict):
+            return {"status": "accepted"}
+        return payload
 
     def create_agent(self, request: AgentCreateRequest) -> AgentCreateResult:
         agent_id = str(uuid4())
@@ -888,6 +1002,8 @@ class AgentManager:
         try:
             self._repository.update_agent_status(agent_id, AgentStatus.deleted)
             logger.info(f"[AgentManager] Agent status updated to deleted in database")
+            # 彻底删除 agent 记录（包括关联的 session、message、skill 等），放在最后执行，确保前面步骤都完成了才删除记录
+            self._repository.delete_agent(agent_id)
         except Exception as exc:
             agent_delete_error = exc
             cleanup_errors.append({"stage": "agent_status", "error": self._error_message(exc)})

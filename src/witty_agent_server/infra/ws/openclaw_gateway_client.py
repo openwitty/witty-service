@@ -21,6 +21,8 @@ DEFAULT_GATEWAY_WS_URL = "ws://127.0.0.1:18789"
 _DEFAULT_CONNECT_TIMEOUT = 10.0
 _DEFAULT_EVENT_TIMEOUT = 30.0
 _DEFAULT_IDLE_TIMEOUT = 30.0
+_DEFAULT_MIN_PROTOCOL = 3
+_DEFAULT_MAX_PROTOCOL = 4
 _DEFAULT_SCOPES = [
     "operator.admin",
     "operator.read",
@@ -194,6 +196,43 @@ class OpenClawGatewayClient(ClientBase):
         )
         return payload
 
+    # 通过 gateway RPC 安装技能。
+    def install_skill(
+        self,
+        *,
+        skill_name: str,
+        agent_id: str | None = None,
+        version: str | None = None,
+        force: bool | None = None,
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {
+            "source": "clawhub",
+            "slug": skill_name,
+        }
+        if isinstance(version, str) and version:
+            params["version"] = version
+        if isinstance(force, bool):
+            params["force"] = force
+
+        logger.info(
+            "install_skill start by gateway rpc, agent_id=%s slug=%s",
+            agent_id,
+            skill_name,
+        )
+        with self._open_connection() as ws:
+            payload = self._rpc(
+                ws,
+                method="skills.install",
+                params=params,
+            )
+        logger.info(
+            "install_skill success by gateway rpc, agent_id=%s slug=%s payload_keys=%s",
+            agent_id,
+            skill_name,
+            sorted(payload.keys()),
+        )
+        return payload
+
     # 删除 runtime 侧会话，优先使用 session.delete，若网关不支持则回退 sessions.delete。
     def delete_session(self, *, session_key: str) -> None:
         with self._open_connection() as ws:
@@ -283,8 +322,9 @@ class OpenClawGatewayClient(ClientBase):
         role = "operator"
         scopes = list(_DEFAULT_SCOPES)
         params: dict[str, Any] = {
-            "minProtocol": 3,
-            "maxProtocol": 3,
+            # Keep compatibility with protocol v3 and newer v4 gateway.
+            "minProtocol": _DEFAULT_MIN_PROTOCOL,
+            "maxProtocol": _DEFAULT_MAX_PROTOCOL,
             "client": {
                 "id": "cli",
                 "version": "2026.4.2",

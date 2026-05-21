@@ -13,13 +13,17 @@ from witty_service.api.schemas import (
     AgentResponse,
     AgentSkillResponse,
     CreateAgentRequest,
+    InstallAgentSkillRequest,
+    UninstallAgentSkillRequest,
     MessageEventsResponse,
     SendMessageRequest,
     SessionEventsResponse,
     SessionResponse,
 )
 from witty_service.api.services import ServiceContainer
-from witty_service.application.agent_manager import AGENT_NOT_FOUND, AgentCreateRequest
+from witty_service.application.agent_manager import AGENT_NOT_FOUND, SKILL_NOT_FOUND, \
+SKILL_INSTALL_RECORD_FAILED, SKILL_UNINSTALL_RECORD_FAILED, SKILL_SYNC_FAILED, AgentCreateRequest
+from witty_service.application.skill_manager import SkillManager
 from witty_service.domain.enums import AgentStatus
 from witty_service.domain.errors import DomainError
 from witty_service.persistence.repositories import AgentRecord
@@ -293,6 +297,61 @@ async def send_message_stream(
 
     return StreamingResponse(stream(), media_type="text/event-stream")
 
+
+@router.post("/{agent_id}/skills/", response_model=AgentSkillResponse, status_code=status.HTTP_202_ACCEPTED)
+async def install_agent_skill(
+    agent_id: str,
+    payload: InstallAgentSkillRequest,
+    services: ServiceContainer = Depends(get_services),
+) -> AgentSkillResponse:
+    skill_manager = SkillManager(repository=services.repository)
+    skill = skill_manager.get_skill_by_skill_id(payload.skill_id)
+    if skill is None:
+        raise DomainError(
+            code=SKILL_NOT_FOUND,
+            message="Skill was not found.",
+            details={"skill_name": payload.skill_name, "skill_id": payload.skill_id},
+        )
+    
+    agent_manager = services.get_agent_manager_for_agent(agent_id)    
+    install_result = await agent_manager.install_agent_skill(
+        agent_id,
+        skill.skill_name,
+    )
+    logger.info(
+        (
+            "Install skill dispatched successfully: agent_id=%s skill_name=%s "
+            "skill_id=%s result_keys=%s"
+        ),
+        agent_id,
+        payload.skill_name,
+        payload.skill_id,
+        sorted(install_result.keys()) if isinstance(install_result, dict) else [],
+    )
+    try:
+        skill_repo = skill_manager.get_repository_by_repo_id(skill.repo_id)
+        installed_record = services.repository.upsert_installed_agent_skill(
+            agent_id=agent_id,
+            skill_id=skill.skill_id,
+            source_type=skill_repo.source_type,
+            repo_id=skill_repo.repo_id,
+            skill_name=skill.skill_name,
+        )
+    except Exception as exc:
+        raise DomainError(
+            code=SKILL_INSTALL_RECORD_FAILED,
+            message="Skill was installed but failed to persist the install record.",
+            details={
+                "agent_id": agent_id,
+                "repo_id": skill.repo_id,
+                "skill_id": skill.skill_id,
+                "error": str(exc),
+            },
+        ) from exc
+
+    return _to_agent_skill_response(installed_record)
+
+
 @router.get("/{agent_id}/skills/installed", response_model=list[AgentSkillResponse])
 def list_installed_agent_skills(
     agent_id: str,
@@ -308,21 +367,69 @@ def list_installed_agent_skills(
         )
 
     records = services.repository.list_installed_agent_skills(agent_id)
-    return [
-        AgentSkillResponse(
-            agent_id=item.agent_id,
-            skill_id=item.skill_id,
-            source_type=item.source_type,
-            repo_id=item.repo_id,
-            skill_name=item.skill_name,
-            installed_at=item.installed_at,
-            relative_path=item.relative_path,
-            metadata=item.metadata,
-            skill_source=item.skill_source,
-            skill_md_url=item.skill_md_url,
+    return [_to_agent_skill_response(item) for item in records]
+
+
+@router.post("/{agent_id}/skills/installed/sync", response_model=list[AgentSkillResponse])
+def sync_installed_agent_skills(
+    agent_id: str,
+    services: ServiceContainer = Depends(get_services),
+) -> list[AgentSkillResponse]:
+    """主动从 runtime 拉取并同步已安装技能，然后返回最新列表。"""
+    manager = services.get_agent_manager_for_agent(agent_id)
+    try:
+        manager.sync_installed_agent_skills(agent_id)
+    except Exception as exc:
+        raise DomainError(
+            code=SKILL_SYNC_FAILED,
+            message="Failed to sync installed skills from runtime.",
+            details={"agent_id": agent_id, "error": str(exc)},
+        ) from exc
+
+    records = services.repository.list_installed_agent_skills(agent_id)
+    return [_to_agent_skill_response(item) for item in records]
+
+
+@router.post("/{agent_id}/skills/uninstall", response_model=AgentSkillResponse)
+async def uninstall_agent_skill(
+    agent_id: str,
+    payload: UninstallAgentSkillRequest,
+    services: ServiceContainer = Depends(get_services),
+) -> AgentSkillResponse:
+    installed_record = services.repository.get_installed_agent_skill(
+        agent_id=agent_id,
+        skill_id=payload.skill_id,
+    )
+    if installed_record is None:
+        raise DomainError(
+            code=SKILL_NOT_FOUND,
+            message="Installed skill was not found.",
+            details={"agent_id": agent_id, "skill_id": payload.skill_id},
         )
-        for item in records
-    ]
+
+    agent_manager = services.get_agent_manager_for_agent(agent_id)
+    await agent_manager.uninstall_agent_skill(
+        agent_id=agent_id,
+        skill_name=installed_record.skill_name,
+    )
+
+    try:
+        services.repository.delete_installed_agent_skill(
+            agent_id=agent_id,
+            skill_id=payload.skill_id,
+        )
+    except Exception as exc:
+        raise DomainError(
+            code=SKILL_UNINSTALL_RECORD_FAILED,
+            message="Skill was uninstalled but failed to clean install records.",
+            details={
+                "agent_id": agent_id,
+                "skill_id": payload.skill_id,
+                "error": str(exc),
+            },
+        ) from exc
+
+    return _to_agent_skill_response(installed_record)
 
 
 def _to_agent_response(
@@ -348,6 +455,21 @@ def _to_agent_response(
         default_session_id=default_session_id,
         process_port=process_port,
         skills=skills or [],
+    )
+
+
+def _to_agent_skill_response(item: Any) -> AgentSkillResponse:
+    return AgentSkillResponse(
+        agent_id=item.agent_id,
+        skill_id=item.skill_id,
+        source_type=item.source_type,
+        repo_id=item.repo_id,
+        skill_name=item.skill_name,
+        installed_at=item.installed_at,
+        relative_path=item.relative_path,
+        metadata=item.metadata,
+        skill_source=item.skill_source,
+        skill_md_url=item.skill_md_url,
     )
 
 
