@@ -70,6 +70,8 @@ class SessionResponse(BaseModel):
     status: str
     context_initialized: bool = False
     runtime_type: str | None = None
+    title: str | None = None
+    pinned: bool = False
     created_at: datetime
     updated_at: datetime
 
@@ -130,6 +132,38 @@ class SessionEventPage(BaseModel):
 class SessionEventsResponse(BaseModel):
     items: list[SessionEventItem]
     pagination: PaginationInfo
+
+class ConversationSummaryResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    agent_id: str
+    title: str | None = None
+    pinned: bool = False
+    status: str
+    message_count: int = 0
+    first_message_preview: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class ConversationDetailResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    agent_id: str
+    title: str | None = None
+    pinned: bool = False
+    status: str
+    messages: list[dict[str, Any]] = Field(default_factory=list)
+    created_at: datetime
+    updated_at: datetime
+
+
+class UpdateConversationRequest(BaseModel):
+    title: str | None = None
+    pinned: bool | None = None
+
 
 class SkillSourceType:
     GIT = 'git'

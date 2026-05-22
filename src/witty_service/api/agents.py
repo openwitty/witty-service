@@ -12,6 +12,8 @@ from witty_service.api.auth import require_bearer_auth
 from witty_service.api.schemas import (
     AgentResponse,
     AgentSkillResponse,
+    ConversationDetailResponse,
+    ConversationSummaryResponse,
     CreateAgentRequest,
     InstallAgentSkillRequest,
     UninstallAgentSkillRequest,
@@ -19,6 +21,7 @@ from witty_service.api.schemas import (
     SendMessageRequest,
     SessionEventsResponse,
     SessionResponse,
+    UpdateConversationRequest,
 )
 from witty_service.api.services import ServiceContainer
 from witty_service.application.agent_manager import AGENT_NOT_FOUND, SKILL_NOT_FOUND, \
@@ -136,6 +139,59 @@ async def delete_agent(agent_id: str, services: ServiceContainer = Depends(get_s
     manager = services.get_agent_manager_for_agent(agent_id)
     await manager.delete_agent(agent_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/{agent_id}/conversations", response_model=list[ConversationSummaryResponse])
+def list_conversations(
+    agent_id: str,
+    services: ServiceContainer = Depends(get_services),
+) -> list[ConversationSummaryResponse]:
+    summaries = services.repository.list_sessions_with_summary(agent_id)
+    return [ConversationSummaryResponse(**s) for s in summaries]
+
+
+@router.get("/{agent_id}/conversations/{session_id}", response_model=ConversationDetailResponse)
+def get_conversation(
+    agent_id: str,
+    session_id: str,
+    services: ServiceContainer = Depends(get_services),
+) -> ConversationDetailResponse:
+    session = services.session_manager.get_session(agent_id, session_id)
+    messages = services.repository.get_messages_with_events(session_id)
+    return ConversationDetailResponse(
+        id=session.id,
+        agent_id=session.agent_id,
+        title=session.title,
+        pinned=session.pinned,
+        status=session.status,
+        messages=messages,
+        created_at=session.created_at,
+        updated_at=session.updated_at,
+    )
+
+
+@router.patch("/{agent_id}/conversations/{session_id}", response_model=SessionResponse)
+def update_conversation(
+    agent_id: str,
+    session_id: str,
+    payload: UpdateConversationRequest,
+    services: ServiceContainer = Depends(get_services),
+) -> SessionResponse:
+    services.session_manager.get_session(agent_id, session_id)
+    updated = services.repository.update_session_metadata(
+        session_id,
+        title=payload.title,
+        pinned=payload.pinned,
+    )
+    return SessionResponse(
+        id=updated.id,
+        agent_id=updated.agent_id,
+        status=updated.status,
+        title=updated.title,
+        pinned=updated.pinned,
+        created_at=updated.created_at,
+        updated_at=updated.updated_at,
+    )
 
 
 @router.post("/{agent_id}/pause", response_model=AgentResponse)
@@ -287,8 +343,6 @@ async def send_message_stream(
 
             async for event in event_stream:
                 yield _format_sse_data(event)
-                if event["event"]["type"] in {"message.completed", "turn.completed"}:
-                    return
 
         except (GeneratorExit, asyncio.CancelledError): 
             if hasattr(event_stream, "aclose"): 

@@ -114,6 +114,38 @@ class AgentRepository(Protocol):
         metadata_json: dict[str, Any] | None = None,
     ) -> str: ...
 
+    def create_message_event_with_retry(
+        self,
+        *,
+        agent_id: str,
+        session_id: str,
+        event_type: str,
+        payload_json: dict[str, Any],
+        seq_no: int,
+        message_id: str | None = None,
+        max_retries: int = 5,
+    ) -> tuple[str, int]: ...
+
+    def create_assistant_message_and_bind_events(
+        self,
+        *,
+        agent_id: str,
+        session_id: str,
+        content: str,
+        event_ids: list[str],
+        metadata_json: dict[str, Any] | None = None,
+    ) -> str: ...
+
+    def get_first_user_message(self, session_id: str) -> str | None: ...
+
+    def update_session_metadata(
+        self,
+        session_id: str,
+        *,
+        title: str | None = None,
+        pinned: bool | None = None,
+    ) -> Any: ...
+
     def delete_agent(self, agent_id: str) -> None: ...
 
     def upsert_builtin_skill(
@@ -759,6 +791,9 @@ class AgentManager:
         )
         ws_client = await self._prepare_ws_message_client(agent_id, session_id, content)
 
+        seq_no = 0
+        event_ids: list[str] = []
+        assistant_text = ""
         terminal_received = False
         try:
             async for event in ws_client.recv():
@@ -788,12 +823,60 @@ class AgentManager:
                     )
                     continue
 
+                # Persist event to SQLite
+                seq_no += 1
+                event_type = event_dict["type"]
+                payload = event_dict.get("payload") if isinstance(event_dict.get("payload"), dict) else {}
+                try:
+                    event_id, seq_no = self._repository.create_message_event_with_retry(
+                        agent_id=agent_id,
+                        session_id=session_id,
+                        event_type=event_type,
+                        payload_json=payload,
+                        seq_no=seq_no,
+                    )
+                    event_ids.append(event_id)
+                except Exception:
+                    self._logger.warning(
+                        "Failed to persist event: agent_id=%s session_id=%s event_type=%s",
+                        agent_id,
+                        session_id,
+                        event_type,
+                        exc_info=True,
+                    )
+
+                if event_type == "message.delta":
+                    assistant_text += payload.get("delta", "")
+                elif event_type == "message.completed":
+                    completed_text = payload.get("text", "")
+                    if completed_text:
+                        assistant_text = completed_text
+
+                if event_type in {"message.completed", "turn.completed"}:
+                    terminal_received = True
+                    # Create assistant message and bind events
+                    try:
+                        self._repository.create_assistant_message_and_bind_events(
+                            agent_id=agent_id,
+                            session_id=session_id,
+                            content=assistant_text,
+                            event_ids=event_ids,
+                        )
+                    except Exception:
+                        self._logger.warning(
+                            "Failed to persist assistant message: agent_id=%s session_id=%s",
+                            agent_id,
+                            session_id,
+                            exc_info=True,
+                        )
+                    self._auto_generate_session_title(agent_id, session_id)
+
                 yield {
                     "sandbox_type": agent.sandbox_type,
                     "event": event_dict,
                 }
-                if event_dict["type"] in {"message.completed", "turn.completed"}:
-                    terminal_received = True
+
+                if event_type in {"message.completed", "turn.completed"}:
                     break
         except GeneratorExit:
             if not terminal_received:
@@ -1198,6 +1281,24 @@ class AgentManager:
                 session_id=session_id,
                 agent_id=agent_id,
                 status="error",
+            )
+
+    def _auto_generate_session_title(self, agent_id: str, session_id: str) -> None:
+        """自动生成会话标题"""
+        try:
+            session = self._session_manager.get_session(agent_id, session_id)
+            if session.title:
+                return
+            first_msg = self._repository.get_first_user_message(session_id)
+            if first_msg:
+                title = first_msg[:50].replace("\n", " ")
+                self._repository.update_session_metadata(session_id, title=title)
+        except Exception:
+            self._logger.warning(
+                "Failed to auto-generate session title: agent_id=%s session_id=%s",
+                agent_id,
+                session_id,
+                exc_info=True,
             )
 
     def _should_filter_session_event(self, event: dict[str, Any]) -> bool:

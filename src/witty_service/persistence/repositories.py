@@ -65,6 +65,8 @@ class SessionRecord:
     status: str
     created_at: datetime
     updated_at: datetime
+    title: str | None = None
+    pinned: bool = False
 
 
 @dataclass(slots=True)
@@ -125,6 +127,99 @@ class AgentSkillRecord:
     metadata: dict[str, Any] | None = None
     skill_source: str | None = None
     skill_md_url: str | None = None
+
+
+def _assemble_message(msg: MessageORM, events: list[MessageEventORM]) -> dict[str, Any]:
+    tool_calls: list[dict[str, Any]] = []
+    tool_calls_by_id: dict[str, dict[str, Any]] = {}
+    thinking: list[str] = []
+    usage: dict[str, Any] | None = None
+    event_items: list[dict[str, Any]] = []
+
+    for evt in events:
+        payload = dict(evt.payload_json or {})
+        item: dict[str, Any] = {
+            "type": evt.event_type,
+            "timestamp": int(evt.created_at.timestamp() * 1000) if evt.created_at else None,
+        }
+
+        if evt.event_type == "tool.call.started":
+            tool_name = payload.get("tool_name", "")
+            tool_call_id = payload.get("tool_call_id", "")
+            tc: dict[str, Any] = {
+                "id": tool_call_id,
+                "name": tool_name,
+                "status": "running",
+                "input": payload.get("arguments"),
+            }
+            tool_calls.append(tc)
+            tool_calls_by_id[tool_call_id] = tc
+            item["toolCall"] = {
+                "id": tool_call_id,
+                "name": tool_name,
+                "status": "running",
+                "input": payload.get("arguments"),
+            }
+
+        elif evt.event_type == "tool.call.response":
+            tool_call_id = payload.get("tool_call_id", "")
+            if tool_call_id and tool_call_id in tool_calls_by_id:
+                tc = tool_calls_by_id[tool_call_id]
+                tc["status"] = "completed" if not payload.get("is_error") else "error"
+                tc["output"] = payload.get("content")
+                tc["duration"] = payload.get("duration")
+                if payload.get("is_error"):
+                    tc["error"] = payload.get("content")
+                item["toolCall"] = {
+                    "id": tool_call_id,
+                    "name": tc.get("name", ""),
+                    "status": tc["status"],
+                    "input": tc.get("input"),
+                    "output": payload.get("content"),
+                    "error": payload.get("content") if payload.get("is_error") else None,
+                    "duration": payload.get("duration"),
+                }
+
+        elif evt.event_type == "thinking":
+            content = payload.get("thinking", "") 
+            if content:
+                thinking.append(content)
+            item["content"] = content
+        
+        elif evt.event_type == "message.delta":
+            # content = payload.get("delta", "") 
+            # item["content"] = content
+            continue
+
+        elif evt.event_type == "usage.updated":
+            usage = {
+                "inputTokens": payload.get("input_tokens"),
+                "outputTokens": payload.get("output_tokens"),
+                "totalCost": payload.get("total_cost"),
+            }
+            item["usage"] = usage
+
+        event_items.append(item)
+    event_items.append({
+        "type": "message.delta",
+        "content": msg.content,
+        "timestamp": int(msg.created_at.timestamp() * 1000),
+    })
+
+    result: dict[str, Any] = {
+        "id": msg.id,
+        "role": msg.role,
+        "content": msg.content,
+        "timestamp": int(msg.created_at.timestamp() * 1000) if msg.created_at else None,
+        "events": event_items,
+    }
+    if tool_calls:
+        result["toolCalls"] = tool_calls
+    if thinking:
+        result["thinking"] = thinking
+    if usage:
+        result["usage"] = usage
+    return result
 
 
 class SqliteRepository:
@@ -456,6 +551,108 @@ class SqliteRepository:
             or "message_events.session_id, message_events.seq_no" in message
         )
 
+    def get_message_count(self, session_id: str) -> int:
+        with self._session_factory() as session:
+            return (
+                session.query(func.count(MessageORM.id))
+                .filter(MessageORM.session_id == session_id)
+                .scalar()
+            ) or 0
+
+    def get_first_user_message(self, session_id: str) -> str | None:
+        with self._session_factory() as session:
+            row = (
+                session.query(MessageORM)
+                .filter(MessageORM.session_id == session_id, MessageORM.role == "user")
+                .order_by(MessageORM.created_at.asc())
+                .first()
+            )
+            if row is None:
+                return None
+            return row.content
+
+    def update_session_metadata(
+        self,
+        session_id: str,
+        *,
+        title: str | None = None,
+        pinned: bool | None = None,
+    ) -> SessionRecord:
+        with self._session_factory() as session:
+            row = session.get(SessionORM, session_id)
+            if row is None:
+                raise KeyError(f"Session not found: {session_id}")
+            if title is not None:
+                row.title = title
+            if pinned is not None:
+                row.pinned = pinned
+            row.updated_at = datetime.now(timezone.utc)
+            session.commit()
+            session.refresh(row)
+            return self._to_session_record(row)
+
+    def list_sessions_with_summary(self, agent_id: str) -> list[dict[str, Any]]:
+        with self._session_factory() as session:
+            rows = (
+                session.query(SessionORM)
+                .filter(SessionORM.agent_id == agent_id)
+                .order_by(SessionORM.updated_at.desc())
+                .all()
+            )
+            result = []
+            for row in rows:
+                msg_count = (
+                    session.query(func.count(MessageORM.id))
+                    .filter(MessageORM.session_id == row.id)
+                    .scalar()
+                ) or 0
+                first_msg = (
+                    session.query(MessageORM)
+                    .filter(MessageORM.session_id == row.id, MessageORM.role == "user")
+                    .order_by(MessageORM.created_at.asc())
+                    .first()
+                )
+                result.append({
+                    "id": row.id,
+                    "agent_id": row.agent_id,
+                    "title": row.title,
+                    "pinned": row.pinned,
+                    "status": row.status.value if isinstance(row.status, SessionStatus) else row.status,
+                    "message_count": msg_count,
+                    "first_message_preview": first_msg.content[:100] if first_msg else None,
+                    "created_at": row.created_at,
+                    "updated_at": row.updated_at,
+                })
+            return result
+
+    def get_messages_with_events(self, session_id: str) -> list[dict[str, Any]]:
+        with self._session_factory() as session:
+            messages = (
+                session.query(MessageORM)
+                .filter(MessageORM.session_id == session_id)
+                .order_by(MessageORM.created_at.asc())
+                .all()
+            )
+            all_events = (
+                session.query(MessageEventORM)
+                .filter(MessageEventORM.session_id == session_id)
+                .order_by(MessageEventORM.seq_no.asc())
+                .all()
+            )
+            events_by_message: dict[str | None, list[MessageEventORM]] = {}
+            for evt in all_events:
+                key = evt.message_id
+                if key not in events_by_message:
+                    events_by_message[key] = []
+                events_by_message[key].append(evt)
+            orphan_events = events_by_message.pop(None, [])
+
+            result = []
+            for msg in messages:
+                evt_rows = events_by_message.pop(msg.id, [])
+                result.append(_assemble_message(msg, evt_rows))
+            return result
+
     def delete_agent(self, agent_id: str) -> None:
         with self._session_factory() as session:
             row = session.get(AgentORM, agent_id)
@@ -515,6 +712,8 @@ class SqliteRepository:
             status=row.status.value
             if isinstance(row.status, SessionStatus)
             else row.status,
+            title=row.title,
+            pinned=row.pinned,
             created_at=row.created_at,
             updated_at=row.updated_at,
         )
