@@ -9,7 +9,6 @@ import subprocess
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from tempfile import TemporaryDirectory
 from urllib.parse import urlparse
 from uuid import NAMESPACE_URL, uuid5
 from zipfile import ZipFile
@@ -97,19 +96,24 @@ class SkillManager:
 
     def delete_skill_repository(self, repo_id: str) -> None:
         stored = self.get_repository_by_repo_id(repo_id)
-        if stored.source_type == SkillSourceType.LOCAL and stored.local_path:
+        extract_dir = self._resolve_extract_dir(stored)
+        if stored.local_path:
             local_path = Path(stored.local_path)
-            if local_path.is_file() and local_path.parent == self._skill_archives_dir:
+            if local_path.is_file():
                 try:
                     local_path.unlink()
                 except Exception as exc:
                     _logger.warning(f'Failed to clean up archive file {local_path}: {exc}')
-            extract_dir = self._resolve_extract_dir(stored)
-            if extract_dir.exists():
+                if extract_dir.exists():
+                    try:
+                        shutil.rmtree(extract_dir)
+                    except Exception as exc:
+                        _logger.warning(f'Failed to clean up extract directory {extract_dir}: {exc}')
+            elif local_path.is_dir():
                 try:
-                    shutil.rmtree(extract_dir)
+                    shutil.rmtree(local_path)
                 except Exception as exc:
-                    _logger.warning(f'Failed to clean up extract directory {extract_dir}: {exc}')
+                    _logger.warning(f'Failed to clean up directory {local_path}: {exc}')
         self.repository.delete_skill_repository(repo_id)
 
     def create_skill_repository_from_archive(
