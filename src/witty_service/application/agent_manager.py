@@ -278,7 +278,7 @@ class AgentManager:
     def _build_builtin_skill_id(self, agent_id: str, skill_name: str) -> str:
         return str(uuid5(NAMESPACE_URL, f"builtin:{agent_id}:{skill_name}"))
 
-    async def install_agent_skill(self, agent_id: str, skill_name: str,) -> dict[str, Any]:
+    async def install_agent_skill(self, agent_id: str, skill_name: str, source_path: str | None = None) -> dict[str, Any]:
         """下发 skill 到 runtime。"""
         agent = self._get_agent(agent_id)
 
@@ -294,11 +294,12 @@ class AgentManager:
         adaptor_client = self._get_adaptor_http_client(agent_id)
         try:
             try:
+                request_body: dict[str, Any] = {"skill_name": skill_name}
+                if source_path:
+                    request_body["source_path"] = source_path
                 payload = await adaptor_client.post(
                     "/agent/skills/install",
-                    json={
-                        "skill_name": skill_name,
-                    },
+                    json=request_body,
                 )
             except httpx.HTTPError as exc:
                 raise DomainError(

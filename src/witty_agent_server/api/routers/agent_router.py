@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 
 class InstallSkillRequest(BaseModel):
     skill_name: str = Field(min_length=1)
+    source_path: str | None = None
 
 
 class UninstallSkillRequest(BaseModel):
@@ -154,6 +155,7 @@ def create_agent_router(
             install_result = resolved_skill_service.install_skill(
                 agent_id=agent.id,
                 skill_name=payload.skill_name,
+                source_path=payload.source_path,
             )
 
             return {

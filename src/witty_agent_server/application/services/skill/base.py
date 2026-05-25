@@ -26,8 +26,9 @@ class AgentSkillServiceBase(ABC):
         *,
         agent_id: str | None = None,
         skill_name: str,
+        source_path: str | None = None,
     ) -> dict[str, Any]:
-        """安装技能到当前 runtime。"""
+        """安装技能到当前 runtime。source_path 非空时为本地技能目录。"""
 
     @abstractmethod
     def uninstall_skill(

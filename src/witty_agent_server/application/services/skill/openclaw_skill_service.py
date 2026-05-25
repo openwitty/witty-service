@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import logging
 import re
+import shutil
 import subprocess
+from pathlib import Path
 from typing import Any
 
 from witty_agent_server.application.services.skill.base import AgentSkillServiceBase
@@ -21,6 +23,7 @@ logger = logging.getLogger(__name__)
 
 class OpenClawSkillService(AgentSkillServiceBase):
     runtime_type = "openclaw"
+    skills_dir = Path.home() / ".openclaw" / "skills"
 
     def list_skills(self, *, agent_id: str | None = None) -> dict[str, Any]:
         """查询并返回当前 agent 可用的技能摘要列表。"""
@@ -92,13 +95,15 @@ class OpenClawSkillService(AgentSkillServiceBase):
         *,
         agent_id: str | None = None,
         skill_name: str,
+        source_path: str | None = None,
     ) -> dict[str, Any]:
-        """优先通过 clawhub 命令安装，失败时回退 gateway RPC 安装。"""
         normalized_name = self._normalize_skill_name(
             skill_name=skill_name,
             error_cls=OpenClawSkillsInstallError,
         )
 
+        if source_path:
+            return self._install_local_skill(normalized_name, source_path)
         try:
             self._install_skill_via_clawhub(normalized_name)
             install_channel = "clawhub_cmd"
@@ -146,6 +151,41 @@ class OpenClawSkillService(AgentSkillServiceBase):
             "skill_name": normalized_name,
             "installed": True,
             "install_channel": install_channel,
+        }
+
+    def _install_local_skill(self, skill_name: str, source_path: str) -> dict[str, Any]:
+        src = Path(source_path).expanduser().resolve()
+        if not src.exists():
+            raise OpenClawSkillsInstallError(
+                runtime_type=self.runtime_type,
+                skill_name=skill_name,
+                reason=f"source path does not exist: {src}",
+            )
+
+        self.skills_dir.mkdir(parents=True, exist_ok=True)
+        dst = self.skills_dir / skill_name
+
+        if dst.exists():
+            shutil.rmtree(dst)
+
+        if src.is_file():
+            dst.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst / src.name)
+        else:
+            shutil.copytree(src, dst)
+
+        logger.info(
+            "install_local_skill success, runtime_type=%s skill_name=%s src=%s dst=%s",
+            self.runtime_type,
+            skill_name,
+            src,
+            dst,
+        )
+        return {
+            "runtime_type": self.runtime_type,
+            "skill_name": skill_name,
+            "installed": True,
+            "install_channel": "local_copy",
         }
 
     def _install_skill_via_clawhub(self, skill_name: str) -> None:

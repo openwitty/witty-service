@@ -298,24 +298,29 @@ async def install_agent_skill(
             message="Skill was not found.",
             details={"skill_name": payload.skill_name, "skill_id": payload.skill_id},
         )
-    
-    agent_manager = services.get_agent_manager_for_agent(agent_id)    
+
+    skill_repo = skill_manager.get_repository_by_repo_id(skill.repo_id)
+    source_path = skill_manager.get_skill_source_path(skill)
+
+    agent_manager = services.get_agent_manager_for_agent(agent_id)
     install_result = await agent_manager.install_agent_skill(
         agent_id,
         skill.skill_name,
+        source_path=source_path,
     )
     logger.info(
         (
             "Install skill dispatched successfully: agent_id=%s skill_name=%s "
-            "skill_id=%s result_keys=%s"
+            "skill_id=%s source_type=%s source_path=%s result_keys=%s"
         ),
         agent_id,
         payload.skill_name,
         payload.skill_id,
+        skill_repo.source_type,
+        source_path,
         sorted(install_result.keys()) if isinstance(install_result, dict) else [],
     )
     try:
-        skill_repo = skill_manager.get_repository_by_repo_id(skill.repo_id)
         installed_record = services.repository.upsert_installed_agent_skill(
             agent_id=agent_id,
             skill_id=skill.skill_id,
