@@ -381,36 +381,42 @@ class SkillManager:
         self, repo: SkillRepositoryRecord
     ) -> list[SkillRecord]:
         clone_url = self._normalize_clone_url_for_git(repo.url)
-        with TemporaryDirectory() as temp_dir:
-            clone_dir = Path(temp_dir) / 'repo'
-            command = ['git', 'clone', '--depth', '1']
-            if repo.branch:
-                command.extend(['--branch', repo.branch])
-            command.extend([clone_url, str(clone_dir)])
-            last_exc: subprocess.CalledProcessError | None = None
-            for _ in range(GIT_CLONE_RETRY_TIMES):
-                try:
-                    subprocess.run(command, check=True, capture_output=True, text=True)
-                    break
-                except subprocess.CalledProcessError as exc:
-                    last_exc = exc
-            else:
-                assert last_exc is not None
-                raise last_exc
+        name = repo.repo_name.split('@')[0].split('/')[-1]
+        clone_dir = self._skill_archives_dir / f'{name}-{repo.repo_id}'
+        if clone_dir.exists():
+            shutil.rmtree(clone_dir)
+        clone_dir.mkdir(parents=True, exist_ok=True)
+        command = ['git', 'clone', '--depth', '1']
+        if repo.branch:
+            command.extend(['--branch', repo.branch])
+        command.extend([clone_url, str(clone_dir)])
+        last_exc: subprocess.CalledProcessError | None = None
+        for _ in range(GIT_CLONE_RETRY_TIMES):
+            try:
+                subprocess.run(command, check=True, capture_output=True, text=True)
+                break
+            except subprocess.CalledProcessError as exc:
+                last_exc = exc
+        else:
+            assert last_exc is not None
+            raise last_exc
 
-            if repo.branch is None:
-                # Persist default branch resolved from cloned repository.
-                detected_branch = self._get_cloned_repo_branch(clone_dir)
-                if detected_branch:
-                    repo = self.repository.update_skill_repository(
-                        repo.repo_id,
-                        branch=detected_branch,
-                    )
-            return self._scan_skill_repository_root(
-                repo=repo,
-                repo_root=clone_dir,
-                only_root=False,
-            )
+        if repo.branch is None:
+            detected_branch = self._get_cloned_repo_branch(clone_dir)
+            if detected_branch:
+                repo = self.repository.update_skill_repository(
+                    repo.repo_id,
+                    branch=detected_branch,
+                )
+        repo = self.repository.update_skill_repository(
+            repo.repo_id,
+            local_path=str(clone_dir),
+        )
+        return self._scan_skill_repository_root(
+            repo=repo,
+            repo_root=clone_dir,
+            only_root=False,
+        )
 
     def _get_cloned_repo_branch(self, clone_dir: Path) -> str | None:
         try:
