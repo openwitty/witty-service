@@ -38,17 +38,17 @@ class SkillManager:
 
     def __post_init__(self) -> None:
         workspace_base = Path(os.getenv('WITTY_WORKSPACE_BASE', '~/witty-service/')).expanduser()
-        self._skill_archives_dir = workspace_base / 'skill-archives'
+        self._skill_archives_dir = workspace_base / 'skill-repositories'
         self._skill_archives_dir.mkdir(parents=True, exist_ok=True)
 
     def list_skill_repositories(self) -> list[SkillRepositoryRecord]:
         return self.repository.list_skill_repositories()
 
-    def create_skill_repository(
+    def create_skill_repository_from_git(
         self, request: SkillRepositoryRequest
     ) -> SkillRepositoryRecord:
         normalized = self._normalize_create_request(request)
-        repository_name = self._derive_repository_name(normalized)
+        repository_name = self._derive_git_repository_name(normalized)
         existing = self.repository.get_skill_repository_by_name(repository_name)
         if existing is not None:
             raise ValueError(
@@ -338,27 +338,16 @@ class SkillManager:
             path = path[:-4]
         return f'{parsed.scheme}://{parsed.netloc}/{path}'
 
-    def _derive_repository_name(self, request: SkillRepositoryRequest) -> str:
-        if request.source_type is None:
-            raise ValueError('source_type is required')
+    def _derive_git_repository_name(self, request: SkillRepositoryRequest) -> str:
+        if request.source_type != SkillSourceType.GIT:
+            raise ValueError(f'Invalid source_type: {request.source_type}')
 
-        if request.source_type == SkillSourceType.GIT:
-            if not request.url:
-                raise ValueError('git skill repositories require url')
-            normalized_url = request.url.removesuffix('.git')
-            if request.branch is None:
-                return normalized_url
-            return f'{normalized_url}@{request.branch}'
-
-        local_path_str = request.local_path
-        if not local_path_str:
-            raise ValueError('local skill repositories require local_path')
-        local_path = Path(local_path_str).expanduser()
-        if local_path.is_file() and local_path.suffix == '.zip':
-            repository_name = local_path.stem or 'local-repository-zip'
-        else:
-            repository_name = local_path.name or 'local-repository'
-        return f'local:{repository_name}'
+        if not request.url:
+            raise ValueError('git skill repositories require url')
+        normalized_url = request.url.removesuffix('.git')
+        if request.branch is None:
+            return normalized_url
+        return f'{normalized_url}@{request.branch}'
 
     def _validate_source_fields(
         self,
@@ -447,7 +436,7 @@ class SkillManager:
         local_path = Path(str(repo.local_path)).expanduser().resolve(strict=False)
         if local_path.is_file() and local_path.suffix == '.zip':
             extract_dir = self._prepare_archive_extract_dir(repo)
-            repo_root = self._extract_local_archive_to_dir(local_path, extract_dir            )
+            repo_root = self._extract_local_archive_to_dir(local_path, extract_dir)
             return self._scan_local_skill_repository_root(repo, repo_root)
         return self._scan_local_skill_repository_root(repo, local_path)
 

@@ -49,14 +49,14 @@ def list_skill_repositories(
     response_model=SkillRepositoryResponse,
     status_code=status.HTTP_201_CREATED,
 )
-def create_skill_repository(
+def create_skill_repository_from_git(
     payload: SkillRepositoryRequest,
     background_tasks: BackgroundTasks,
     services: ServiceContainer = Depends(get_services),
 ) -> SkillRepositoryResponse:
     service = _build_service(services)
     try:
-        created = service.create_skill_repository(payload)
+        created = service.create_skill_repository_from_git(payload)
     except ValueError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     background_tasks.add_task(
