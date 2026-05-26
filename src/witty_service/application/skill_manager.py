@@ -242,10 +242,24 @@ class SkillManager:
         return self.repository.get_skill_by_skill_id(skill_id)
 
     def get_skill_source_path(self, skill: SkillRecord) -> str | None:
-        if skill.repo_id is None or skill.relative_path is None:
+        """
+        四种技能来源：
+        1. buildin的skill_source_path是绝对路径：直接返回relative_path.parent
+        2. git/local是本地路径：根据repo_id和relative_path拼接
+        3. clawhub的技能，没有relative_path：返回None
+        """
+        # 如果relative_path为空，返回None, 比如clawhub的技能
+        if skill.relative_path is None:
+            return None
+
+        # 如果是绝对路径，直接返回， 比如openclaw技能的绝对路径
+        if os.path.isabs(skill.relative_path):
+            return str(Path(skill.relative_path).parent)
+        
+        if skill.repo_id is None:
             return None
         repo = self.repository.get_skill_repository(skill.repo_id)
-        if repo is None or repo.source_type != SkillSourceType.LOCAL:
+        if repo is None or not repo.local_path:
             return None
         local_path = Path(str(repo.local_path)).expanduser().resolve(strict=False)
         if local_path.is_file() and local_path.suffix == '.zip':
@@ -452,7 +466,7 @@ class SkillManager:
 
     def _resolve_extract_dir(self, repo: SkillRepositoryRecord) -> Path:
         local_path = Path(str(repo.local_path)).expanduser().resolve(strict=False)
-        stem = local_path.stem if local_path.is_file() and local_path.suffix == '.zip' else local_path.name
+        stem = local_path.stem if local_path.suffix == '.zip' else local_path.name
         return self._skill_archives_dir / f'{stem}-{repo.repo_id}'
 
     def _prepare_archive_extract_dir(self, repo: SkillRepositoryRecord) -> Path:

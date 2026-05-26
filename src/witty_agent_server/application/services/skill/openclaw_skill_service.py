@@ -219,20 +219,26 @@ class OpenClawSkillService(AgentSkillServiceBase):
         *,
         agent_id: str | None = None,
         skill_name: str,
-        source_type: str | None = None,
+        source_path: str | None = None,
     ) -> dict[str, Any]:
         del agent_id
         normalized_name = self._normalize_skill_name(
             skill_name=skill_name,
             error_cls=OpenClawSkillsUninstallError,
         )
+        logger.info(f"uninstall_skill normalized_name={normalized_name} source_path={source_path}")
+        if source_path:
+            return self._uninstall_local_skill(normalized_name, source_path)
+        logger.info(f"uninstall_skill 2 normalized_name={normalized_name} source_path={source_path}")
 
-        if source_type == "local":
-            return self._uninstall_local_skill(normalized_name)
 
         command = ["clawhub", "uninstall", normalized_name, "--yes"]
         try:
-            subprocess.run(command, check=True, capture_output=True, text=True)
+            result = subprocess.run(command, check=True, capture_output=True, text=True)
+            logger.info(
+                "clawhub uninstall success, skill_name=%s command=%s stdout=%s stderr=%s",
+                normalized_name, command, result.stdout.strip(), result.stderr.strip(),
+            )
         except FileNotFoundError as exc:
             raise OpenClawSkillsUninstallError(
                 runtime_type=self.runtime_type,
@@ -262,14 +268,13 @@ class OpenClawSkillService(AgentSkillServiceBase):
             "uninstall_channel": "clawhub_cmd",
         }
 
-    def _uninstall_local_skill(self, skill_name: str) -> dict[str, Any]:
-        dst = self.skills_dir / skill_name
-
+    def _uninstall_local_skill(self, skill_name: str, source_path: str) -> dict[str, Any]:
+        dst = Path(source_path).expanduser().resolve()
         if dst.exists():
             shutil.rmtree(dst)
 
         logger.info(
-            "uninstall_local_skill success, runtime_type=%s skill_name=%s dst=%s",
+            "uninstall_local_skill success, runtime_type=%s skill_name=%s source_path=%s",
             self.runtime_type,
             skill_name,
             dst,
