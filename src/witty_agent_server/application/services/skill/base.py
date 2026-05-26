@@ -36,6 +36,7 @@ class AgentSkillServiceBase(ABC):
         *,
         agent_id: str | None = None,
         skill_name: str,
+        source_type: str | None = None,
         source_path: str | None = None,
     ) -> dict[str, Any]:
-        """卸载当前 runtime source_path 非空时走本地删除逻辑。"""
+        """卸载当前 runtime 中的技能。source_type 为 'local'/'git' 时删除 ~/.openclaw/skills/{name}/，'builtin' 时按 source_path 删除。"""

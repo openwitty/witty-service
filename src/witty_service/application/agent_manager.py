@@ -318,7 +318,7 @@ class AgentManager:
             return {"status": "accepted"}
         return payload
 
-    async def uninstall_agent_skill(self, agent_id: str, skill_name: str, source_path: str | None = None) -> dict[str, Any]:
+    async def uninstall_agent_skill(self, agent_id: str, skill_name: str, source_type: str | None = None, source_path: str | None = None) -> dict[str, Any]:
         """从 runtime 卸载 skill。"""
         agent = self._get_agent(agent_id)
 
@@ -335,6 +335,8 @@ class AgentManager:
         try:
             try:
                 request_body: dict[str, Any] = {"skill_name": skill_name}
+                if source_type:
+                    request_body["source_type"] = source_type
                 if source_path:
                     request_body["source_path"] = source_path
                 payload = await adaptor_client.post(

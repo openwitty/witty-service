@@ -219,6 +219,7 @@ class OpenClawSkillService(AgentSkillServiceBase):
         *,
         agent_id: str | None = None,
         skill_name: str,
+        source_type: str | None = None,
         source_path: str | None = None,
     ) -> dict[str, Any]:
         del agent_id
@@ -226,11 +227,12 @@ class OpenClawSkillService(AgentSkillServiceBase):
             skill_name=skill_name,
             error_cls=OpenClawSkillsUninstallError,
         )
-        logger.info(f"uninstall_skill normalized_name={normalized_name} source_path={source_path}")
-        if source_path:
-            return self._uninstall_local_skill(normalized_name, source_path)
-        logger.info(f"uninstall_skill 2 normalized_name={normalized_name} source_path={source_path}")
 
+        if source_type in ("local", "git"):
+            return self._uninstall_local_skill(normalized_name)
+
+        if source_type == "builtin" and source_path:
+            return self._uninstall_builtin_skill(normalized_name, source_path)
 
         command = ["clawhub", "uninstall", normalized_name, "--yes"]
         try:
@@ -268,13 +270,13 @@ class OpenClawSkillService(AgentSkillServiceBase):
             "uninstall_channel": "clawhub_cmd",
         }
 
-    def _uninstall_local_skill(self, skill_name: str, source_path: str) -> dict[str, Any]:
-        dst = Path(source_path).expanduser().resolve()
+    def _uninstall_local_skill(self, skill_name: str) -> dict[str, Any]:
+        dst = self.skills_dir / skill_name
         if dst.exists():
             shutil.rmtree(dst)
 
         logger.info(
-            "uninstall_local_skill success, runtime_type=%s skill_name=%s source_path=%s",
+            "uninstall_local_skill success, runtime_type=%s skill_name=%s dst=%s",
             self.runtime_type,
             skill_name,
             dst,
@@ -284,6 +286,24 @@ class OpenClawSkillService(AgentSkillServiceBase):
             "skill_name": skill_name,
             "uninstalled": True,
             "uninstall_channel": "local_remove",
+        }
+
+    def _uninstall_builtin_skill(self, skill_name: str, source_path: str) -> dict[str, Any]:
+        dst = Path(source_path).expanduser().resolve()
+        if dst.exists():
+            shutil.rmtree(dst)
+
+        logger.info(
+            "uninstall_builtin_skill success, runtime_type=%s skill_name=%s dst=%s",
+            self.runtime_type,
+            skill_name,
+            dst,
+        )
+        return {
+            "runtime_type": self.runtime_type,
+            "skill_name": skill_name,
+            "uninstalled": True,
+            "uninstall_channel": "builtin_remove",
         }
 
     def _normalize_skill_name(
