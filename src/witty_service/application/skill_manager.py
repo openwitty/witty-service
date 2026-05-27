@@ -94,26 +94,46 @@ class SkillManager:
             local_path=local_path or None,
         )
 
+    def _ensure_path_under_archives_dir(self, target: Path) -> Path:
+        resolved = target.expanduser().resolve()
+        base = self._skill_archives_dir.resolve()
+        try:
+            resolved.relative_to(base)
+        except ValueError:
+            raise ValueError(
+                f"Path {resolved} is outside allowed directory {base}"
+            )
+        return resolved
+
     def delete_skill_repository(self, repo_id: str) -> None:
         stored = self.get_repository_by_repo_id(repo_id)
-        extract_dir = self._resolve_extract_dir(stored)
         if stored.local_path:
             local_path = Path(stored.local_path)
-            if local_path.is_file():
-                try:
-                    local_path.unlink()
-                except Exception as exc:
-                    _logger.warning(f'Failed to clean up archive file {local_path}: {exc}')
-                if extract_dir.exists():
+            try:
+                local_path = self._ensure_path_under_archives_dir(local_path)
+            except ValueError as exc:
+                _logger.warning(f'Skipping local_path cleanup: {exc}')
+            else:
+                if local_path.is_file():
                     try:
-                        shutil.rmtree(extract_dir)
+                        local_path.unlink()
                     except Exception as exc:
-                        _logger.warning(f'Failed to clean up extract directory {extract_dir}: {exc}')
-            elif local_path.is_dir():
-                try:
-                    shutil.rmtree(local_path)
-                except Exception as exc:
-                    _logger.warning(f'Failed to clean up directory {local_path}: {exc}')
+                        _logger.warning(f'Failed to clean up archive file {local_path}: {exc}')
+                    extract_dir = self._resolve_extract_dir(stored)
+                    try:
+                        extract_dir = self._ensure_path_under_archives_dir(extract_dir)
+                    except ValueError as exc:
+                        _logger.warning(f'Skipping extract_dir cleanup: {exc}')
+                    if extract_dir.exists():
+                        try:
+                            shutil.rmtree(extract_dir)
+                        except Exception as exc:
+                            _logger.warning(f'Failed to clean up extract directory {extract_dir}: {exc}')
+                elif local_path.is_dir():
+                    try:
+                        shutil.rmtree(local_path)
+                    except Exception as exc:
+                        _logger.warning(f'Failed to clean up directory {local_path}: {exc}')
         self.repository.delete_skill_repository(repo_id)
 
     def create_skill_repository_from_archive(
