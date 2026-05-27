@@ -231,14 +231,21 @@ class SkillManager:
                     repository=self.repository,
                     repo_id=repository.repo_id,
                 )
-            except Exception:
+            except Exception as exc:
+                _logger.warning(
+                    "Failed to discover awesome-openclaw-skills repository %s: %s",
+                    repository.repo_id,
+                    exc,
+                )
                 self.repository.update_skills(repository.repo_id, skills=[])
                 self.repository.update_skill_repository(
                     repository.repo_id,
                     skill_discover_status=SkillDiscoverStatus.FAILED,
                     skill_num=0,
                 )
-                raise
+                raise ValueError(
+                    f'Failed to discover awesome-openclaw-skills repository {repository.repo_id}'
+                ) from exc
 
         self._set_discovery_status(repository, SkillDiscoverStatus.DISCOVERING)
         try:
@@ -249,14 +256,22 @@ class SkillManager:
                 skill_discover_status=SkillDiscoverStatus.DONE,
                 skill_num=len(skill_list),
             )
-        except Exception:
+        except Exception as exc:
+            _logger.warning(
+                'Failed to discover skills from repository %s (%s): %s',
+                repository.repo_id,
+                repository.repo_name,
+                exc,
+            )
             self.repository.update_skills(repository.repo_id, skills=[])
             self.repository.update_skill_repository(
                 repository.repo_id,
                 skill_discover_status=SkillDiscoverStatus.FAILED,
                 skill_num=0,
             )
-            raise
+            raise ValueError(
+                f'Failed to discover skills from repository {repository.repo_id}'
+            ) from exc
 
     def get_skill_by_skill_id(self, skill_id: str) -> SkillRecord | None:
         return self.repository.get_skill_by_skill_id(skill_id)
@@ -496,12 +511,25 @@ class SkillManager:
         extract_dir.mkdir(parents=True, exist_ok=True)
         return extract_dir
 
+    @staticmethod
+    def _validate_zip_entries(archive: ZipFile, extract_dir: Path) -> None:
+        extract_dir_resolved = extract_dir.resolve()
+        for member in archive.namelist():
+            member_path = (extract_dir_resolved / member).resolve()
+            try:
+                member_path.relative_to(extract_dir_resolved)
+            except ValueError:
+                raise ValueError(
+                    f"ZIP entry '{member}' resolves to path outside target directory"
+                )
+
     def _extract_local_archive_to_dir(
         self,
         archive_path: Path,
         extract_dir: Path,
     ) -> Path:
         with ZipFile(archive_path) as archive:
+            self._validate_zip_entries(archive, extract_dir)
             archive.extractall(extract_dir)
         return self._find_archive_repo_root(extract_dir)
 
