@@ -34,6 +34,10 @@ class OpenClawSkillService(AgentSkillServiceBase):
         Path.home() / ".openclaw" / "plugin-skills",
     ]
 
+    _ALLOWED_SOURCE_BASES: list[Path] = [
+        Path(os.getenv("WITTY_WORKSPACE_BASE", "~/witty-service/")).expanduser() / "skill-repositories",
+    ]
+
     @classmethod
     def _validate_path_under_allowed_bases(cls, target: Path) -> Path:
         resolved = target.expanduser().resolve()
@@ -47,6 +51,21 @@ class OpenClawSkillService(AgentSkillServiceBase):
         raise ValueError(
             f"Path {resolved} is outside allowed directories: "
             f"{[str(b) for b in cls._ALLOWED_DELETE_BASES]}"
+        )
+
+    @classmethod
+    def _validate_source_path_under_workspace(cls, target: Path) -> Path:
+        resolved = target.expanduser().resolve()
+        for base in cls._ALLOWED_SOURCE_BASES:
+            base_resolved = base.resolve()
+            try:
+                resolved.relative_to(base_resolved)
+                return resolved
+            except ValueError:
+                continue
+        raise ValueError(
+            f"Source path {resolved} is outside allowed directories: "
+            f"{[str(b) for b in cls._ALLOWED_SOURCE_BASES]}"
         )
 
     def list_skills(self, *, agent_id: str | None = None) -> dict[str, Any]:
@@ -179,6 +198,14 @@ class OpenClawSkillService(AgentSkillServiceBase):
 
     def _install_local_skill(self, skill_name: str, source_path: str) -> dict[str, Any]:
         src = Path(source_path).expanduser().resolve()
+        try:
+            src = self._validate_source_path_under_workspace(src)
+        except ValueError as exc:
+            raise OpenClawSkillsInstallError(
+                runtime_type=self.runtime_type,
+                skill_name=skill_name,
+                reason=str(exc),
+            ) from exc
         if not src.exists():
             raise OpenClawSkillsInstallError(
                 runtime_type=self.runtime_type,
@@ -188,6 +215,15 @@ class OpenClawSkillService(AgentSkillServiceBase):
 
         self.skills_dir.mkdir(parents=True, exist_ok=True)
         dst = self.skills_dir / skill_name
+
+        try:
+            dst = self._validate_path_under_allowed_bases(dst)
+        except ValueError as exc:
+            raise OpenClawSkillsInstallError(
+                runtime_type=self.runtime_type,
+                skill_name=skill_name,
+                reason=str(exc),
+            ) from exc
 
         if dst.exists():
             shutil.rmtree(dst)
