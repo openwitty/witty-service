@@ -795,6 +795,10 @@ class SqliteRepository:
         source_type: str,
         skill_name: str,
         repo_id: str | None = None,
+        relative_path: str | None = None,
+        metadata: dict[str, Any] | None = None,
+        skill_source: str | None = None,
+        skill_md_url: str | None = None,
         installed_at: datetime | None = None,
     ) -> AgentSkillRecord:
         with self._session_factory() as session:
@@ -807,6 +811,10 @@ class SqliteRepository:
                     source_type=source_type,
                     repo_id=repo_id,
                     skill_name=skill_name,
+                    relative_path=relative_path,
+                    metadata_json=dict(metadata) if metadata else None,
+                    skill_source=skill_source,
+                    skill_md_url=skill_md_url,
                     installed_at=timestamp,
                 )
                 session.add(row)
@@ -814,6 +822,10 @@ class SqliteRepository:
                 row.source_type = source_type
                 row.repo_id = repo_id
                 row.skill_name = skill_name
+                row.relative_path = relative_path
+                row.metadata_json = dict(metadata) if metadata else None
+                row.skill_source = skill_source
+                row.skill_md_url = skill_md_url
                 row.installed_at = timestamp
             session.commit()
             session.refresh(row)
@@ -910,6 +922,10 @@ class SqliteRepository:
                         source_type='builtin',
                         repo_id=None,
                         skill_name=item["skill_name"],
+                        relative_path=item["relative_path"],
+                        metadata_json=item["metadata"],
+                        skill_source=item["skill_source"],
+                        skill_md_url=None,
                         installed_at=timestamp,
                     )
                 )
@@ -919,15 +935,14 @@ class SqliteRepository:
     def list_installed_agent_skills(self, agent_id: str) -> list[AgentSkillRecord]:
         with self._session_factory() as session:
             rows = (
-                session.query(AgentSkillORM, SkillORM)
-                .outerjoin(SkillORM, AgentSkillORM.skill_id == SkillORM.skill_id)
+                session.query(AgentSkillORM)
                 .filter(AgentSkillORM.agent_id == agent_id)
                 .order_by(AgentSkillORM.installed_at.asc(), AgentSkillORM.skill_name.asc())
                 .all()
             )
             return [
-                self._to_agent_skill_record(agent_skill_row, skill_row)
-                for agent_skill_row, skill_row in rows
+                self._to_agent_skill_record(row)
+                for row in rows
             ]
 
     def get_installed_agent_skill(
@@ -937,19 +952,10 @@ class SqliteRepository:
         skill_id: str,
     ) -> AgentSkillRecord | None:
         with self._session_factory() as session:
-            row = (
-                session.query(AgentSkillORM, SkillORM)
-                .outerjoin(SkillORM, AgentSkillORM.skill_id == SkillORM.skill_id)
-                .filter(
-                    AgentSkillORM.agent_id == agent_id,
-                    AgentSkillORM.skill_id == skill_id,
-                )
-                .one_or_none()
-            )
+            row = session.get(AgentSkillORM, (agent_id, skill_id))
             if row is None:
                 return None
-            agent_skill_row, skill_row = row
-            return self._to_agent_skill_record(agent_skill_row, skill_row)
+            return self._to_agent_skill_record(row)
 
     def delete_installed_agent_skill(self, *, agent_id: str, skill_id: str) -> None:
         with self._session_factory() as session:
@@ -998,7 +1004,6 @@ class SqliteRepository:
     @staticmethod
     def _to_agent_skill_record(
         row: AgentSkillORM,
-        skill_row: SkillORM | None = None,
     ) -> AgentSkillRecord:
         return AgentSkillRecord(
             agent_id=row.agent_id,
@@ -1007,8 +1012,8 @@ class SqliteRepository:
             repo_id=row.repo_id,
             skill_name=row.skill_name,
             installed_at=row.installed_at,
-            relative_path=skill_row.relative_path if skill_row is not None else None,
-            metadata=dict(skill_row.metadata_json or {}) if skill_row is not None else None,
-            skill_source=skill_row.skill_source if skill_row is not None else None,
-            skill_md_url=skill_row.skill_md_url if skill_row is not None else None,
+            relative_path=row.relative_path,
+            metadata=dict(row.metadata_json or {}) if row.metadata_json else None,
+            skill_source=row.skill_source,
+            skill_md_url=row.skill_md_url,
         )

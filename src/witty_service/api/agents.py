@@ -341,6 +341,10 @@ async def install_agent_skill(
             source_type=skill_repo.source_type,
             repo_id=skill_repo.repo_id,
             skill_name=skill.skill_name,
+            relative_path=skill.relative_path,
+            metadata=skill.metadata,
+            skill_source=skill.skill_source,
+            skill_md_url=skill.skill_md_url,
         )
     except Exception as exc:
         raise DomainError(

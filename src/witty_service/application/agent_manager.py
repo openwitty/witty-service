@@ -134,6 +134,10 @@ class AgentRepository(Protocol):
         source_type: str,
         skill_name: str,
         repo_id: str | None = None,
+        relative_path: str | None = None,
+        metadata: dict[str, Any] | None = None,
+        skill_source: str | None = None,
+        skill_md_url: str | None = None,
         installed_at: datetime | None = None,
     ) -> Any: ...
 
@@ -273,6 +277,9 @@ class AgentManager:
                 source_type='builtin',
                 repo_id=None,
                 skill_name=normalized_name,
+                relative_path=relative_path,
+                metadata=dict(item),
+                skill_source=source_value,
             )
 
     def _build_builtin_skill_id(self, agent_id: str, skill_name: str) -> str:

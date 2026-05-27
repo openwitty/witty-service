@@ -281,7 +281,7 @@ class AgentSkillORM(Base):
         ),
         CheckConstraint(
             "(source_type = 'builtin' AND repo_id IS NULL) OR "
-            "(source_type IN ('git', 'local', 'clawhub') AND repo_id IS NOT NULL)",
+            "source_type IN ('git', 'local', 'clawhub')",
             name='ck_agent_skills_repo_id_by_source',
         ),
     )
@@ -299,6 +299,15 @@ class AgentSkillORM(Base):
         nullable=True,
     )
     skill_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    relative_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(
+        'metadata',
+        JSON,
+        nullable=True,
+        default=dict,
+    )
+    skill_source: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    skill_md_url: Mapped[str | None] = mapped_column(String(255), nullable=True)
     installed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
