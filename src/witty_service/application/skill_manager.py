@@ -299,7 +299,9 @@ class SkillManager:
         local_path = Path(str(repo.local_path)).expanduser().resolve(strict=False)
         if local_path.is_file() and local_path.suffix == '.zip':
             extract_dir = self._resolve_extract_dir(repo)
-            repo_root = self._find_archive_repo_root(extract_dir) if extract_dir.exists() else extract_dir
+            if not extract_dir.exists():
+                return None
+            repo_root = self._find_archive_repo_root(extract_dir)
         else:
             repo_root = local_path
         skill_file = repo_root / skill.relative_path
