@@ -196,8 +196,6 @@ def _assemble_message(msg: MessageORM, events: list[MessageEventORM]) -> dict[st
             item["content"] = content
         
         elif evt.event_type == "message.delta":
-            # content = payload.get("delta", "") 
-            # item["content"] = content
             continue
 
         elif evt.event_type == "usage.updated":
@@ -209,6 +207,7 @@ def _assemble_message(msg: MessageORM, events: list[MessageEventORM]) -> dict[st
             item["usage"] = usage
 
         event_items.append(item)
+        
     event_items.append({
         "type": "message.delta",
         "content": msg.content,
@@ -327,8 +326,20 @@ class SqliteRepository:
                 .subquery()
             )
 
+            last_status_subq = (
+                session.query(MessageORM.status)
+                .filter(
+                    MessageORM.session_id == SessionORM.id,
+                    MessageORM.role == "assistant",
+                )
+                .order_by(MessageORM.created_at.desc())
+                .limit(1)
+                .correlate(SessionORM)
+                .scalar_subquery()
+            )
+
             rows = (
-                session.query(AgentORM, SessionORM, func.coalesce(msg_count_subq.c.msg_count, 0))
+                session.query(AgentORM, SessionORM, func.coalesce(msg_count_subq.c.msg_count, 0), last_status_subq)
                 .outerjoin(SessionORM, SessionORM.agent_id == AgentORM.id)
                 .outerjoin(msg_count_subq, SessionORM.id == msg_count_subq.c.session_id)
                 .filter(AgentORM.status != AgentStatus.deleted.value)
@@ -340,7 +351,7 @@ class SqliteRepository:
             )
 
             agents_map: dict[str, dict[str, Any]] = {}
-            for agent_row, session_row, msg_count in rows:
+            for agent_row, session_row, msg_count, last_status in rows:
                 if agent_row.id not in agents_map:
                     agents_map[agent_row.id] = {
                         "id": agent_row.id,
@@ -365,6 +376,7 @@ class SqliteRepository:
                         "pinned": session_row.pinned,
                         "status": session_row.status.value if isinstance(session_row.status, SessionStatus) else str(session_row.status),
                         "message_count": msg_count,
+                        "last_message_status": last_status.value if isinstance(last_status, MessageStatus) else last_status,
                         "created_at": session_row.created_at,
                         "updated_at": session_row.updated_at,
                     })
@@ -767,15 +779,31 @@ class SqliteRepository:
                 .subquery()
             )
 
+            last_status_subq = (
+                session.query(MessageORM.status)
+                .filter(
+                    MessageORM.session_id == SessionORM.id,
+                    MessageORM.role == "assistant",
+                )
+                .order_by(MessageORM.created_at.desc())
+                .limit(1)
+                .correlate(SessionORM)
+                .scalar_subquery()
+            )
+
             rows = (
-                session.query(SessionORM, func.coalesce(msg_count_subq.c.msg_count, 0))
+                session.query(
+                    SessionORM,
+                    func.coalesce(msg_count_subq.c.msg_count, 0),
+                    last_status_subq,
+                )
                 .outerjoin(msg_count_subq, SessionORM.id == msg_count_subq.c.session_id)
                 .filter(SessionORM.agent_id == agent_id)
                 .order_by(SessionORM.updated_at.desc())
                 .all()
             )
             result = []
-            for row, msg_count in rows:
+            for row, msg_count, last_status in rows:
                 result.append({
                     "id": row.id,
                     "agent_id": row.agent_id,
@@ -783,6 +811,7 @@ class SqliteRepository:
                     "pinned": row.pinned,
                     "status": row.status.value if isinstance(row.status, SessionStatus) else row.status,
                     "message_count": msg_count,
+                    "last_message_status": last_status.value if isinstance(last_status, MessageStatus) else last_status,
                     "created_at": row.created_at,
                     "updated_at": row.updated_at,
                 })
