@@ -194,6 +194,7 @@ class SkillSourceType:
     GIT = 'git'
     LOCAL = 'local'
     BUILDIN = 'builtin'
+    CLAWHUB = 'clawhub'
 
 
 class SkillRepositoryRequest(BaseModel):

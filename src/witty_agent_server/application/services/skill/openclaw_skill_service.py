@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
+import shutil
 import subprocess
+from pathlib import Path
 from typing import Any
 
 from witty_agent_server.application.services.skill.base import AgentSkillServiceBase
@@ -21,6 +24,49 @@ logger = logging.getLogger(__name__)
 
 class OpenClawSkillService(AgentSkillServiceBase):
     runtime_type = "openclaw"
+    skills_dir = Path.home() / ".openclaw" / "skills"
+
+    _ALLOWED_DELETE_BASES: list[Path] = [
+        skills_dir,
+        Path.home() / ".agent" / "skills",
+        Path.home() / ".openclaw" / "workspace/skills",
+        Path.home() / ".openclaw" / "workspace/.agents/skills",
+        Path.home() / ".openclaw" / "plugin-skills",
+    ]
+
+    _ALLOWED_SOURCE_BASES: list[Path] = [
+        Path(os.getenv("WITTY_WORKSPACE_BASE", "~/witty-service/")).expanduser() / "skill-repositories",
+    ]
+
+    @classmethod
+    def _validate_path_under_allowed_bases(cls, target: Path) -> Path:
+        resolved = target.expanduser().resolve()
+        for base in cls._ALLOWED_DELETE_BASES:
+            base_resolved = base.resolve()
+            try:
+                resolved.relative_to(base_resolved)
+                return resolved
+            except ValueError:
+                continue
+        raise ValueError(
+            f"Path {resolved} is outside allowed directories: "
+            f"{[str(b) for b in cls._ALLOWED_DELETE_BASES]}"
+        )
+
+    @classmethod
+    def _validate_source_path_under_workspace(cls, target: Path) -> Path:
+        resolved = target.expanduser().resolve()
+        for base in cls._ALLOWED_SOURCE_BASES:
+            base_resolved = base.resolve()
+            try:
+                resolved.relative_to(base_resolved)
+                return resolved
+            except ValueError:
+                continue
+        raise ValueError(
+            f"Source path {resolved} is outside allowed directories: "
+            f"{[str(b) for b in cls._ALLOWED_SOURCE_BASES]}"
+        )
 
     def list_skills(self, *, agent_id: str | None = None) -> dict[str, Any]:
         """查询并返回当前 agent 可用的技能摘要列表。"""
@@ -92,13 +138,15 @@ class OpenClawSkillService(AgentSkillServiceBase):
         *,
         agent_id: str | None = None,
         skill_name: str,
+        source_path: str | None = None,
     ) -> dict[str, Any]:
-        """优先通过 clawhub 命令安装，失败时回退 gateway RPC 安装。"""
         normalized_name = self._normalize_skill_name(
             skill_name=skill_name,
             error_cls=OpenClawSkillsInstallError,
         )
 
+        if source_path:
+            return self._install_local_skill(normalized_name, source_path)
         try:
             self._install_skill_via_clawhub(normalized_name)
             install_channel = "clawhub_cmd"
@@ -148,6 +196,58 @@ class OpenClawSkillService(AgentSkillServiceBase):
             "install_channel": install_channel,
         }
 
+    def _install_local_skill(self, skill_name: str, source_path: str) -> dict[str, Any]:
+        src = Path(source_path).expanduser().resolve()
+        try:
+            src = self._validate_source_path_under_workspace(src)
+        except ValueError as exc:
+            raise OpenClawSkillsInstallError(
+                runtime_type=self.runtime_type,
+                skill_name=skill_name,
+                reason=str(exc),
+            ) from exc
+        if not src.exists():
+            raise OpenClawSkillsInstallError(
+                runtime_type=self.runtime_type,
+                skill_name=skill_name,
+                reason=f"source path does not exist: {src}",
+            )
+
+        self.skills_dir.mkdir(parents=True, exist_ok=True)
+        dst = self.skills_dir / skill_name
+
+        try:
+            dst = self._validate_path_under_allowed_bases(dst)
+        except ValueError as exc:
+            raise OpenClawSkillsInstallError(
+                runtime_type=self.runtime_type,
+                skill_name=skill_name,
+                reason=str(exc),
+            ) from exc
+
+        if dst.exists():
+            shutil.rmtree(dst)
+
+        if src.is_file():
+            dst.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst / src.name)
+        else:
+            shutil.copytree(src, dst)
+
+        logger.info(
+            "install_local_skill success, runtime_type=%s skill_name=%s src=%s dst=%s",
+            self.runtime_type,
+            skill_name,
+            src,
+            dst,
+        )
+        return {
+            "runtime_type": self.runtime_type,
+            "skill_name": skill_name,
+            "installed": True,
+            "install_channel": "local_copy",
+        }
+
     def _install_skill_via_clawhub(self, skill_name: str) -> None:
         command = ["clawhub", "install", skill_name, "--force"]
         try:
@@ -179,15 +279,28 @@ class OpenClawSkillService(AgentSkillServiceBase):
         *,
         agent_id: str | None = None,
         skill_name: str,
+        source_type: str | None = None,
+        source_path: str | None = None,
     ) -> dict[str, Any]:
         del agent_id
         normalized_name = self._normalize_skill_name(
             skill_name=skill_name,
             error_cls=OpenClawSkillsUninstallError,
         )
+
+        if source_type in ("local", "git"):
+            return self._uninstall_local_skill(normalized_name)
+
+        if source_type == "builtin" and source_path:
+            return self._uninstall_builtin_skill(normalized_name, source_path)
+
         command = ["clawhub", "uninstall", normalized_name, "--yes"]
         try:
-            subprocess.run(command, check=True, capture_output=True, text=True)
+            result = subprocess.run(command, check=True, capture_output=True, text=True)
+            logger.info(
+                "clawhub uninstall success, skill_name=%s command=%s stdout=%s stderr=%s",
+                normalized_name, command, result.stdout.strip(), result.stderr.strip(),
+            )
         except FileNotFoundError as exc:
             raise OpenClawSkillsUninstallError(
                 runtime_type=self.runtime_type,
@@ -215,6 +328,57 @@ class OpenClawSkillService(AgentSkillServiceBase):
             "skill_name": normalized_name,
             "uninstalled": True,
             "uninstall_channel": "clawhub_cmd",
+        }
+
+    def _uninstall_local_skill(self, skill_name: str) -> dict[str, Any]:
+        dst = self.skills_dir / skill_name
+        try:
+            dst = self._validate_path_under_allowed_bases(dst)
+        except ValueError as exc:
+            raise OpenClawSkillsUninstallError(
+                runtime_type=self.runtime_type,
+                skill_name=skill_name,
+                reason=str(exc),
+            ) from exc
+        if dst.exists():
+            shutil.rmtree(dst)
+
+        logger.info(
+            "uninstall_local_skill success, runtime_type=%s skill_name=%s dst=%s",
+            self.runtime_type,
+            skill_name,
+            dst,
+        )
+        return {
+            "runtime_type": self.runtime_type,
+            "skill_name": skill_name,
+            "uninstalled": True,
+            "uninstall_channel": "local_remove",
+        }
+
+    def _uninstall_builtin_skill(self, skill_name: str, source_path: str) -> dict[str, Any]:
+        try:
+            dst = self._validate_path_under_allowed_bases(Path(source_path))
+        except ValueError as exc:
+            raise OpenClawSkillsUninstallError(
+                runtime_type=self.runtime_type,
+                skill_name=skill_name,
+                reason=str(exc),
+            ) from exc
+        if dst.exists():
+            shutil.rmtree(dst)
+
+        logger.info(
+            "uninstall_builtin_skill success, runtime_type=%s skill_name=%s dst=%s",
+            self.runtime_type,
+            skill_name,
+            dst,
+        )
+        return {
+            "runtime_type": self.runtime_type,
+            "skill_name": skill_name,
+            "uninstalled": True,
+            "uninstall_channel": "builtin_remove",
         }
 
     def _normalize_skill_name(

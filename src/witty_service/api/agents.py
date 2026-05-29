@@ -408,30 +408,39 @@ async def install_agent_skill(
             message="Skill was not found.",
             details={"skill_name": payload.skill_name, "skill_id": payload.skill_id},
         )
-    
-    agent_manager = services.get_agent_manager_for_agent(agent_id)    
+
+    skill_repo = skill_manager.get_repository_by_repo_id(skill.repo_id)
+    skill_source_path = skill_manager.get_skill_source_path(skill)
+
+    agent_manager = services.get_agent_manager_for_agent(agent_id)
     install_result = await agent_manager.install_agent_skill(
         agent_id,
         skill.skill_name,
+        source_path=skill_source_path,
     )
     logger.info(
         (
             "Install skill dispatched successfully: agent_id=%s skill_name=%s "
-            "skill_id=%s result_keys=%s"
+            "skill_id=%s source_type=%s skill_source_path=%s result_keys=%s"
         ),
         agent_id,
         payload.skill_name,
         payload.skill_id,
+        skill_repo.source_type,
+        skill_source_path,
         sorted(install_result.keys()) if isinstance(install_result, dict) else [],
     )
     try:
-        skill_repo = skill_manager.get_repository_by_repo_id(skill.repo_id)
         installed_record = services.repository.upsert_installed_agent_skill(
             agent_id=agent_id,
             skill_id=skill.skill_id,
             source_type=skill_repo.source_type,
             repo_id=skill_repo.repo_id,
             skill_name=skill.skill_name,
+            relative_path=skill.relative_path,
+            metadata=skill.metadata,
+            skill_source=skill.skill_source,
+            skill_md_url=skill.skill_md_url,
         )
     except Exception as exc:
         raise DomainError(
@@ -503,10 +512,16 @@ async def uninstall_agent_skill(
             details={"agent_id": agent_id, "skill_id": payload.skill_id},
         )
 
+    skill_manager = SkillManager(repository=services.repository)
+    skill = skill_manager.get_skill_by_skill_id(payload.skill_id)
+    skill_source_path = skill_manager.get_skill_source_path(skill) if skill else None
+
     agent_manager = services.get_agent_manager_for_agent(agent_id)
     await agent_manager.uninstall_agent_skill(
         agent_id=agent_id,
         skill_name=installed_record.skill_name,
+        source_type=installed_record.source_type,
+        source_path=skill_source_path,
     )
 
     try:
