@@ -162,6 +162,7 @@ class ConversationSummaryResponse(BaseModel):
     pinned: bool = False
     status: str
     message_count: int = 0
+    last_message_status: str | None = None
     first_message_preview: str | None = None
     created_at: UtcDatetime
     updated_at: UtcDatetime

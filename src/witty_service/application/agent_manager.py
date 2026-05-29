@@ -75,7 +75,6 @@ class AgentCreateRequest:
 @dataclass(slots=True, frozen=True)
 class AgentCreateResult:
     agent: AgentRecord
-    default_session: SessionRecord
 
 
 class SandboxState(Protocol):
@@ -600,16 +599,6 @@ class AgentManager:
             finally:
                 client.close()
 
-            default_session = self._session_manager.upsert_session(
-                session_id=session_data["id"],
-                agent_id=agent_id,
-                status=session_data.get("status", "idle"),
-                context_initialized=session_data.get("context_initialized", True),
-                runtime_type=session_data.get("runtime_type"),
-                created_at=datetime.fromisoformat(session_data["created_at"]) if "created_at" in session_data else None,
-                remote_runtime_agent_id=remote_runtime_agent_id,
-            )
-            logger.info(f"[AgentManager] Default session created: {default_session.id}")
             running_agent = self._repository.update_agent_status(
                 agent_id,
                 AgentStatus.running,
@@ -617,7 +606,6 @@ class AgentManager:
             logger.info(f"[AgentManager] Agent status updated to running, creation complete")
             return AgentCreateResult(
                 agent=replace(running_agent, workspace_path=workspace_path),
-                default_session=default_session,
             )
         except Exception as exc:
             logger.error(f"[AgentManager] Agent creation failed with error: {exc}")
@@ -803,6 +791,7 @@ class AgentManager:
             role="user",
             content=content,
         )
+        self._auto_generate_session_title(agent_id, session_id)
 
         ws_content = self._maybe_prepend_interruption_prefix(session_id, content)
         ws_client = await self._prepare_ws_message_client(agent_id, session_id, ws_content)
@@ -905,6 +894,7 @@ class AgentManager:
             role="user",
             content=content,
         )
+        self._auto_generate_session_title(agent_id, session_id)
 
         ws_content = self._maybe_prepend_interruption_prefix(session_id, content)
         ws_client = await self._prepare_ws_message_client(agent_id, session_id, ws_content)
@@ -1031,7 +1021,6 @@ class AgentManager:
                                     "Failed to compact delta events: msg_id=%s",
                                     assistant_msg_id, exc_info=True,
                                 )
-                        self._auto_generate_session_title(agent_id, session_id)
 
                     _stream_registry.push_event(session_id, event_dict, stream_gen)
 

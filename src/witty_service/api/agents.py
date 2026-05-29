@@ -65,7 +65,7 @@ def create_agent(
         if sandbox_state is not None:
             process_port = sandbox_state.sandbox_payload_json.get("metadata", {}).get("port")
 
-    return _to_agent_response(result.agent, default_session_id=result.default_session.id, process_port=process_port)
+    return _to_agent_response(result.agent, default_session_id=None, process_port=process_port)
 
 
 @router.get("", response_model=list[AgentResponse] | list[AgentWithConversationsResponse])
