@@ -4,6 +4,14 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+DEFAULT_COMMIT_MESSAGE_TEMPLATE = """{{subject}}
+
+commit {{commit_id}} {{source}}
+
+{{body}}
+
+{{trailers}}"""
+
 
 class BackportConfigPayload(BaseModel):
     project_url: str = ""
@@ -14,6 +22,9 @@ class BackportConfigPayload(BaseModel):
     patch_dataset_dir: str = ""
     signer_name: str = ""
     signer_email: str = ""
+    commit_message_template: str = DEFAULT_COMMIT_MESSAGE_TEMPLATE
+    linux_repo_path: str = "~/Image/linux"
+    commit_sort: str = "describe"
     current_excel_path: str = ""
     current_report_path: str = ""
     current_filtered_report_path: str = ""
