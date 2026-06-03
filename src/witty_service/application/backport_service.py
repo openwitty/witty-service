@@ -14,6 +14,14 @@ from witty_service.domain.errors import DomainError
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_COMMIT_MESSAGE_TEMPLATE = """{{subject}}
+
+commit {{commit_id}} {{source}}
+
+{{body}}
+
+{{trailers}}"""
+
 
 def _default_config() -> dict[str, str]:
     return {
@@ -25,6 +33,9 @@ def _default_config() -> dict[str, str]:
         "patch_dataset_dir": "",
         "signer_name": "",
         "signer_email": "",
+        "commit_message_template": DEFAULT_COMMIT_MESSAGE_TEMPLATE,
+        "linux_repo_path": "~/Image/linux",
+        "commit_sort": "describe",
         "current_excel_path": "",
         "current_report_path": "",
         "current_filtered_report_path": "",
@@ -163,6 +174,7 @@ class BackportService:
             "load_git_log": self._run_load_git_log,
             "load_git_show": self._run_load_git_show,
             "load_patch_preview": self._run_load_patch_preview,
+            "preview_commit_message": self._run_preview_commit_message,
             "execute_selected": self._run_execute_selected,
             "apply_row": self._run_apply_row,
             "check_manual_patch": self._run_check_manual_patch,
@@ -194,6 +206,9 @@ class BackportService:
                 patch_dataset_dir=config["patch_dataset_dir"],
                 signer_name=config["signer_name"],
                 signer_email=config["signer_email"],
+                commit_message_template=config["commit_message_template"],
+                linux_repo_path=config["linux_repo_path"],
+                commit_sort=config["commit_sort"],
             )
         except (RuntimeError, FileNotFoundError, NotADirectoryError, ValueError) as error:
             logger.exception("generate_report failed")
@@ -295,6 +310,8 @@ class BackportService:
                 patch_dataset_dir=config["patch_dataset_dir"],
                 signer_name=config["signer_name"],
                 signer_email=config["signer_email"],
+                commit_message_template=config["commit_message_template"],
+                linux_repo_path=config["linux_repo_path"],
                 working_report_path=working_report_path,
             )
         except (RuntimeError, FileNotFoundError, ValueError) as error:
@@ -307,6 +324,7 @@ class BackportService:
             }
 
     def _run_apply_row(self, payload: dict[str, Any]) -> dict[str, Any]:
+        config = self._extract_config(payload)
         base_report_path = self._require_string(payload, "apply_row", "base_report_path", "baseReportPath")
         working_report_path = self._get_string(
             payload,
@@ -326,6 +344,8 @@ class BackportService:
             return self._cvekit_client.apply_row(
                 base_report_path=base_report_path,
                 row=row,
+                commit_message_template=config["commit_message_template"],
+                linux_repo_path=config["linux_repo_path"],
                 working_report_path=working_report_path,
             )
         except (RuntimeError, FileNotFoundError, ValueError) as error:
@@ -339,6 +359,46 @@ class BackportService:
                 "summary": str(error),
                 "diagnostics": {"error_text": str(error)},
                 "report": {"commit_count": 1, "commits": [failed_row]},
+            }
+
+    def _run_preview_commit_message(self, payload: dict[str, Any]) -> dict[str, Any]:
+        config = self._extract_config(payload)
+        base_report_path = self._require_string(
+            payload,
+            "preview_commit_message",
+            "base_report_path",
+            "baseReportPath",
+        )
+        working_report_path = self._get_string(
+            payload,
+            "working_report_path",
+            "workingReportPath",
+            "current_filtered_report_path",
+            "currentFilteredReportPath",
+        )
+        row = payload.get("row")
+        if not isinstance(row, dict) or not row:
+            raise DomainError(
+                code="BACKPORT_ROW_INVALID",
+                message="row must be a non-empty object.",
+                details={"action": "preview_commit_message"},
+            )
+        template_override = self._get_string(payload, "commit_message_template", "commitMessageTemplate")
+        try:
+            return self._cvekit_client.preview_commit_message(
+                base_report_path=base_report_path,
+                row=row,
+                commit_message_template=template_override or config["commit_message_template"],
+                linux_repo_path=config["linux_repo_path"],
+                working_report_path=working_report_path,
+            )
+        except (RuntimeError, FileNotFoundError, ValueError) as error:
+            logger.exception("preview_commit_message failed")
+            return {
+                "operation": "preview_commit_message",
+                "status": "failed",
+                "summary": str(error),
+                "diagnostics": {"error_text": str(error)},
             }
 
     def _run_check_manual_patch(self, payload: dict[str, Any]) -> dict[str, Any]:

@@ -20,6 +20,7 @@ class BackportCvekitClient:
         "input_commit",
         "commit_title",
         "committed_datetime",
+        "git_describe",
         "target_branch",
     }
     PATCH_KIND_TO_KEY = {
@@ -653,6 +654,9 @@ class BackportCvekitClient:
         patch_dataset_dir: str,
         signer_name: str,
         signer_email: str,
+        commit_message_template: str,
+        linux_repo_path: str,
+        commit_sort: str = "describe",
     ) -> dict[str, Any]:
         env = self._build_env()
 
@@ -689,6 +693,9 @@ class BackportCvekitClient:
             "patch_dataset_dir": patch_dataset_dir,
             "signer_name": signer_name,
             "signer_email": signer_email,
+            "commit_message_template": commit_message_template,
+            "linux_repo_path": linux_repo_path,
+            "commit_sort": commit_sort,
         }.items():
             if isinstance(value, str) and value.strip():
                 base_config[key] = value.strip()
@@ -865,6 +872,8 @@ class BackportCvekitClient:
         patch_dataset_dir: str,
         signer_name: str,
         signer_email: str,
+        commit_message_template: str,
+        linux_repo_path: str,
         working_report_path: str | None = None,
     ) -> dict[str, Any]:
         env = self._build_env()
@@ -925,6 +934,10 @@ class BackportCvekitClient:
             config_data["signer_email"] = signer_email.strip()
         if target_path.strip():
             config_data["target_path"] = target_path.strip()
+        if commit_message_template.strip():
+            config_data["commit_message_template"] = commit_message_template
+        if linux_repo_path.strip():
+            config_data["linux_repo_path"] = linux_repo_path.strip()
         with filtered_report_path.open("w", encoding="utf-8") as handle:
             yaml.safe_dump(config_data, handle, allow_unicode=True, sort_keys=False)
 
@@ -960,6 +973,8 @@ class BackportCvekitClient:
         self,
         base_report_path: str,
         row: dict[str, Any],
+        commit_message_template: str,
+        linux_repo_path: str,
         working_report_path: str | None = None,
     ) -> dict[str, Any]:
         env = self._build_env()
@@ -993,6 +1008,11 @@ class BackportCvekitClient:
             }
         apply_value = self._resolve_apply_value(resolved_row)
         target_row_id = self._build_row_id(resolved_row)
+        self._override_commit_message_config(
+            apply_config_path,
+            commit_message_template=commit_message_template,
+            linux_repo_path=linux_repo_path,
+        )
 
         result = self._run_cvekit(
             ["--action", "backport-batch",
@@ -1023,6 +1043,57 @@ class BackportCvekitClient:
             "stage": "interactive_editing",
             "summary": apply_result.get("error") or "单条应用执行完成",
             "report": {"commit_count": len(affected_rows), "commits": affected_rows},
+        }
+
+    def preview_commit_message(
+        self,
+        base_report_path: str,
+        row: dict[str, Any],
+        commit_message_template: str,
+        linux_repo_path: str,
+        working_report_path: str | None = None,
+    ) -> dict[str, Any]:
+        env = self._build_env()
+        base_path = Path(base_report_path).expanduser().resolve()
+        if not base_path.exists():
+            raise FileNotFoundError(f"base_report_path 不存在: {base_path}")
+        preview_config_path = base_path
+        if working_report_path:
+            candidate_path = Path(working_report_path).expanduser().resolve()
+            if candidate_path.exists():
+                preview_config_path = candidate_path
+
+        resolved_row = self._resolve_commit_row(
+            row=row,
+            base_report_path=base_report_path,
+            working_report_path=working_report_path,
+        )
+        apply_value = self._resolve_apply_value(resolved_row)
+        cmd = [
+            "--action", "backport-batch",
+            "--backport-config", str(preview_config_path),
+            "--debug", "--json",
+            "--preview-commit-message",
+            "--apply", apply_value,
+        ]
+        if commit_message_template.strip():
+            cmd.extend(["--commit-message-template", commit_message_template])
+        if linux_repo_path.strip():
+            cmd.extend(["--linux-repo-path", linux_repo_path.strip()])
+        result = self._run_cvekit(cmd, env, preview_config_path.parent)
+        preview_result = self._parse_json_output(result.stdout)
+        if preview_result.get("status") != "success":
+            raise RuntimeError(str(preview_result.get("error") or preview_result))
+        return {
+            "operation": "preview_commit_message",
+            "status": "success",
+            "summary": "commit message 预览已生成",
+            "commit_message": {
+                "message": preview_result.get("commit_message") or preview_result.get("commit_message_preview") or "",
+                "context": preview_result.get("commit_message_context") or {},
+                "source_detection": preview_result.get("source_detection") or {},
+                "warnings": preview_result.get("commit_message_warnings") or [],
+            },
         }
 
     def load_patch_preview(
@@ -1060,6 +1131,27 @@ class BackportCvekitClient:
                 "size_bytes": patch_file.stat().st_size,
             },
         }
+
+    @staticmethod
+    def _override_commit_message_config(
+        config_path: Path,
+        *,
+        commit_message_template: str,
+        linux_repo_path: str,
+    ) -> None:
+        try:
+            with config_path.open("r", encoding="utf-8") as handle:
+                config_data = yaml.safe_load(handle) or {}
+        except FileNotFoundError:
+            raise
+        if not isinstance(config_data, dict):
+            raise ValueError(f"backport 配置不是对象: {config_path}")
+        if commit_message_template.strip():
+            config_data["commit_message_template"] = commit_message_template
+        if linux_repo_path.strip():
+            config_data["linux_repo_path"] = linux_repo_path.strip()
+        with config_path.open("w", encoding="utf-8") as handle:
+            yaml.safe_dump(config_data, handle, allow_unicode=True, sort_keys=False)
 
     @staticmethod
     def _resolve_apply_value(row: dict[str, Any]) -> str:
