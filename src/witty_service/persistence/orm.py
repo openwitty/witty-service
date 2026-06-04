@@ -54,6 +54,9 @@ class AgentORM(Base):
     workspace_path: Mapped[str] = mapped_column(Text, nullable=False)
     idle_timeout_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
     has_scheduled_tasks: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    model_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    mcp_server_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    mcp_server_config: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     last_active_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,

@@ -1,4 +1,5 @@
 from collections.abc import Callable, Sequence
+import json
 from subprocess import CompletedProcess, run
 
 
@@ -81,21 +82,130 @@ class OpenClawGatewayStartError(OpenClawLifecycleError):
         )
 
 
+class OpenClawMcpSetError(OpenClawLifecycleError):
+    def __init__(
+        self,
+        *,
+        command: Sequence[str],
+        returncode: int,
+        stdout: str,
+        stderr: str,
+    ) -> None:
+        super().__init__(
+            action="mcp set",
+            command=command,
+            returncode=returncode,
+            stdout=stdout,
+            stderr=stderr,
+            message="openclaw mcp set failed",
+        )
+
+
+class OpenClawOnboardError(OpenClawLifecycleError):
+    def __init__(
+        self,
+        *,
+        command: Sequence[str],
+        returncode: int,
+        stdout: str,
+        stderr: str,
+    ) -> None:
+        super().__init__(
+            action="onboard",
+            command=command,
+            returncode=returncode,
+            stdout=stdout,
+            stderr=stderr,
+            message="openclaw onboard failed",
+        )
+
+
 class OpenClawLifecycleService:
     def __init__(self, runner: CommandRunner | None = None) -> None:
         self._runner: CommandRunner = runner or self._default_runner
 
     def probe_running(self) -> bool:
         result = self._invoke_gateway_command("status")
-        if result.returncode == 0:
-            return True
+        if result.returncode != 0:
+            return False
         return self._result_indicates_running(result)
 
     def stop(self) -> None:
         self._run_or_raise(action="stop")
 
     def start(self) -> None:
-        self._run_or_raise(action="start")
+        """已废弃：使用 onboard() 方法替代。"""
+        raise NotImplementedError(
+            "start() method is deprecated. Use onboard() instead."
+        )
+
+    def mcp_set(self, name: str, config: dict[str, object]) -> None:
+        """设置 MCP 配置。"""
+        config_str = json.dumps(config, ensure_ascii=False)
+        command = ["openclaw", "mcp", "set", name, config_str]
+        result = self._run_command(command)
+        if result.returncode != 0:
+            raise OpenClawMcpSetError(
+                command=command,
+                returncode=result.returncode,
+                stdout=result.stdout or "",
+                stderr=result.stderr or "",
+            )
+
+    def onboard(
+        self,
+        *,
+        auth_choice: str,
+        api_key: str,
+        install_daemon: bool = False,
+        skip_channels: bool = True,
+        skip_search: bool = True,
+        skip_hooks: bool = True,
+    ) -> None:
+        """执行 openclaw onboard 命令来配置和启动 gateway。
+        
+        根据 temp/model 方案，不同模型提供商对应不同的 --auth-choice 参数：
+        
+        | 模型提供商 | --auth-choice 参数 |
+        | :--- | :--- |
+        | openai | openai-api-key |
+        | anthropic | anthropic-api-key |
+        | google | google-api-key |
+        | xai | xai-api-key |
+        | deepseek | deepseek-api-key |
+        | alibaba | qwen-api-key |
+        | zhipuai | zai-api-key |
+        | minimax | minimax-api-key |
+        | moonshotai | kimi-code-api-key |
+        | custom | custom-api-key |
+        """
+        command = [
+            "openclaw",
+            "onboard",
+            "--non-interactive",
+            "--accept-risk",
+            "--auth-choice",
+            auth_choice,
+            f"--{auth_choice}",
+            api_key,
+        ]
+        if install_daemon:
+            command.append("--install-daemon")
+        if skip_channels:
+            command.append("--skip-channels")
+        if skip_search:
+            command.append("--skip-search")
+        if skip_hooks:
+            command.append("--skip-hooks")
+        
+        result = self._run_command(command)
+        if result.returncode != 0:
+            raise OpenClawOnboardError(
+                command=command,
+                returncode=result.returncode,
+                stdout=result.stdout or "",
+                stderr=result.stderr or "",
+            )
 
     def _run_or_raise(
         self,
@@ -123,11 +233,14 @@ class OpenClawLifecycleService:
         action: str,
     ) -> CompletedProcess[str]:
         command = ["openclaw", "gateway", action]
+        return self._run_command(command)
+
+    def _run_command(self, command: list[str]) -> CompletedProcess[str]:
         try:
             return self._runner(command)
         except Exception as exc:  # pragma: no cover - defensive guard
             raise self._command_error(
-                action=action,
+                action=" ".join(command[:2]),
                 command=command,
                 returncode=-1,
                 stdout="",
@@ -152,6 +265,20 @@ class OpenClawLifecycleService:
             )
         if action == "stop":
             return OpenClawGatewayStopError(
+                command=command,
+                returncode=returncode,
+                stdout=stdout,
+                stderr=stderr,
+            )
+        if action == "mcp set":
+            return OpenClawMcpSetError(
+                command=command,
+                returncode=returncode,
+                stdout=stdout,
+                stderr=stderr,
+            )
+        if action == "onboard":
+            return OpenClawOnboardError(
                 command=command,
                 returncode=returncode,
                 stdout=stdout,

@@ -25,6 +25,8 @@ share/python-wheels/
 *.egg
 MANIFEST
 requirements.txt
+db/
+temp/
 
 # PyInstaller
 #  Usually these files are written by a python script from a template
@@ -56,6 +58,7 @@ cover/
 *.pot
 
 docs/superpowers
+*-*-*-*-*/
 
 # Django stuff:
 local_settings.py

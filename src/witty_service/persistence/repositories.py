@@ -37,6 +37,9 @@ class AgentRecord:
     workspace_path: str
     idle_timeout_seconds: int
     has_scheduled_tasks: bool
+    model_id: str | None
+    mcp_server_name: str | None
+    mcp_server_config: dict[str, Any] | None
     last_active_at: datetime | None
     created_at: datetime
     updated_at: datetime
@@ -247,6 +250,9 @@ class SqliteRepository:
         status: AgentStatus | str = AgentStatus.creating,
         sandbox_id: str | None = None,
         has_scheduled_tasks: bool = False,
+        model_id: str | None = None,
+        mcp_server_name: str | None = None,
+        mcp_server_config: dict[str, Any] | None = None,
         last_active_at: datetime | None = None,
     ) -> AgentRecord:
         return self.create_agent_with_id(
@@ -260,6 +266,9 @@ class SqliteRepository:
             status=status,
             sandbox_id=sandbox_id,
             has_scheduled_tasks=has_scheduled_tasks,
+            model_id=model_id,
+            mcp_server_name=mcp_server_name,
+            mcp_server_config=mcp_server_config,
             last_active_at=last_active_at,
         )
 
@@ -276,6 +285,9 @@ class SqliteRepository:
         status: AgentStatus | str = AgentStatus.creating,
         sandbox_id: str | None = None,
         has_scheduled_tasks: bool = False,
+        model_id: str | None = None,
+        mcp_server_name: str | None = None,
+        mcp_server_config: dict[str, Any] | None = None,
         last_active_at: datetime | None = None,
     ) -> AgentRecord:
         with self._session_factory() as session:
@@ -290,6 +302,9 @@ class SqliteRepository:
                 workspace_path=workspace_path,
                 idle_timeout_seconds=idle_timeout_seconds,
                 has_scheduled_tasks=has_scheduled_tasks,
+                model_id=model_id,
+                mcp_server_name=mcp_server_name,
+                mcp_server_config=mcp_server_config,
                 last_active_at=last_active_at,
             )
             session.add(row)
@@ -363,6 +378,9 @@ class SqliteRepository:
                         "workspace_path": agent_row.workspace_path,
                         "idle_timeout_seconds": agent_row.idle_timeout_seconds,
                         "has_scheduled_tasks": agent_row.has_scheduled_tasks,
+                        "model_id": agent_row.model_id,
+                        "mcp_server_name": agent_row.mcp_server_name,
+                        "mcp_server_config": agent_row.mcp_server_config,
                         "created_at": agent_row.created_at,
                         "updated_at": agent_row.updated_at,
                         "conversations": [],
@@ -904,6 +922,9 @@ class SqliteRepository:
             workspace_path=row.workspace_path,
             idle_timeout_seconds=row.idle_timeout_seconds,
             has_scheduled_tasks=row.has_scheduled_tasks,
+            model_id=row.model_id,
+            mcp_server_name=row.mcp_server_name,
+            mcp_server_config=row.mcp_server_config,
             last_active_at=row.last_active_at,
             created_at=row.created_at,
             updated_at=row.updated_at,

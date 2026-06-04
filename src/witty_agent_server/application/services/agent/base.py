@@ -26,7 +26,18 @@ class OpenClawLifecyclePort(Protocol):
 
     def stop(self) -> None: ...
 
-    def start(self) -> None: ...
+    def mcp_set(self, name: str, config: dict[str, object]) -> None: ...
+
+    def onboard(
+        self,
+        *,
+        auth_choice: str,
+        api_key: str,
+        install_daemon: bool = False,
+        skip_channels: bool = True,
+        skip_search: bool = True,
+        skip_hooks: bool = True,
+    ) -> None: ...
 
 
 @runtime_checkable
@@ -71,7 +82,7 @@ class AgentServiceBase(ABC):
         *,
         agent_id: str | None = None,
         config: dict[str, Any] | None = None,
-        reload: bool = False,
+        reload: bool = True,
     ) -> Agent:
         """启动 agent。"""
 

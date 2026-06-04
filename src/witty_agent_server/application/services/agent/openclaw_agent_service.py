@@ -1,25 +1,14 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 from typing import Any
 
-from witty_agent_server.application.materialization.openclaw_materializer import (
-    InvalidOpenClawSpecError,
-    OpenClawMaterializationError,
-    SpecNotFoundError,
-    materialize as materialize_openclaw_spec,
-)
-from witty_agent_server.application.materialization.ports import (
-    MaterializeReport,
-    SpecMaterializerPort,
-)
+
 from witty_agent_server.application.models.agent import Agent, AgentStatus
 from witty_agent_server.application.services.agent.base import (
     AgentServiceBase,
     GatewayAgentClientPort,
     OpenClawLifecyclePort,
-    RuntimeWorkspaceResolverPort,
 )
 from witty_agent_server.application.services.agent.errors import (
     AgentDefaultNotConfiguredError,
@@ -31,9 +20,7 @@ from witty_agent_server.application.services.agent.openclaw_lifecycle_service im
     OpenClawLifecycleError,
     OpenClawLifecycleService,
 )
-from witty_agent_server.application.services.agent.runtime_workspace_resolver import (
-    RuntimeWorkspaceResolver,
-)
+
 from witty_agent_server.infra.ws.openclaw_gateway_client import OpenClawGatewayClient
 from witty_agent_server.runtimes.runtime_base import RuntimeType
 
@@ -41,29 +28,31 @@ from witty_agent_server.runtimes.runtime_base import RuntimeType
 logger = logging.getLogger(__name__)
 
 
-class _DefaultOpenClawMaterializer(SpecMaterializerPort):
-    """默认的 OpenClaw spec 物化器。"""
-
-    def materialize(self, spec_path: Path) -> MaterializeReport:
-        return materialize_openclaw_spec(spec_path)
-
-
 class OpenClawAgentService(AgentServiceBase):
     """当前项目使用的 openclaw 版本 agent service。"""
+
+    PROVIDER_TO_AUTH_CHOICE: dict[str, str] = {
+        "openai": "openai-api-key",
+        "anthropic": "anthropic-api-key",
+        "google": "google-api-key",
+        "xai": "xai-api-key",
+        "deepseek": "deepseek-api-key",
+        "alibaba": "qwen-api-key",
+        "zhipuai": "zai-api-key",
+        "minimax": "minimax-api-key",
+        "moonshotai": "kimi-code-api-key",
+        "custom": "custom-api-key",
+    }
 
     def __init__(
         self,
         agent: Agent | None = None,
-        workspace_resolver: RuntimeWorkspaceResolverPort | None = None,
         lifecycle_service: OpenClawLifecyclePort | None = None,
-        materializer: SpecMaterializerPort | None = None,
         gateway_agent_client: GatewayAgentClientPort | None = None,
         runtime: RuntimeType = "openclaw",
     ) -> None:
         super().__init__(agent=agent, runtime=runtime)
-        self._workspace_resolver = workspace_resolver or RuntimeWorkspaceResolver()
         self._lifecycle_service = lifecycle_service or OpenClawLifecycleService()
-        self._materializer = materializer or _DefaultOpenClawMaterializer()
         self._gateway_agent_client = gateway_agent_client or OpenClawGatewayClient()
 
     def start(
@@ -71,28 +60,27 @@ class OpenClawAgentService(AgentServiceBase):
         *,
         agent_id: str | None = None,
         config: dict[str, Any] | None = None,
-        reload: bool = False,
+        reload: bool = True,
     ) -> Agent:
-        """启动 openclaw runtime，并绑定到 gateway 中已加载的 agent。"""
+        """启动 openclaw runtime，并绑定到 gateway 中已加载的 agent。
+        
+        使用 onboard 命令启动，支持根据模型提供商选择不同的认证方式。
+        """
         with self._lock:
-            self._last_start_already_running = False
-            if config is not None:
-                self._agent.config = dict(config)
 
-            resolved_agent_id, configured_agent = self._resolve_target_agent(
-                requested_agent_id=agent_id
-            )
-
-            spec_path = self._workspace_resolver.get_agent_spec_path(self._runtime)
             is_running = self._probe_openclaw_running()
             logger.info(
                 "agent start requested: agent_id=%s runtime=%s reload=%s running=%s",
-                resolved_agent_id,
+                agent_id,
                 self._runtime,
                 reload,
                 is_running,
             )
+
             if is_running and not reload:
+                resolved_agent_id, configured_agent = self._resolve_target_agent(
+                    requested_agent_id=agent_id
+                )
                 self._ensure_gateway_agent_loaded(agent_id=resolved_agent_id)
                 self._agent.id = resolved_agent_id
                 self._agent.status = AgentStatus.RUNNING
@@ -104,10 +92,21 @@ class OpenClawAgentService(AgentServiceBase):
                 )
                 return self.agent
 
-            self._materialize_spec(spec_path)
             if is_running:
                 self._stop_openclaw()
-            self._start_openclaw()
+
+            model_provider = config.get("model", {}).get("provider", "") if config else ""
+            api_key = config.get("model", {}).get("api_key", "") if config else ""
+
+            self._setup_mcp(
+                mcp_server_name=config.get("mcp_server_name") if config else None,
+                mcp_server_config=config.get("mcp_server_config") if config else None,
+            )
+            self._onboard_openclaw(model_provider=model_provider, api_key=api_key)
+
+            resolved_agent_id, configured_agent = self._resolve_target_agent(
+                requested_agent_id=agent_id
+            )
             self._ensure_gateway_agent_loaded(agent_id=resolved_agent_id)
 
             self._agent.id = resolved_agent_id
@@ -119,6 +118,43 @@ class OpenClawAgentService(AgentServiceBase):
                 configured_agent.get("id"),
             )
             return self.agent
+
+    def _setup_mcp(self, mcp_server_name: str | None, mcp_server_config: dict[str, Any] | None) -> None:
+        """设置 MCP 配置（如果在 config 中指定了）。"""
+        
+        if mcp_server_name and mcp_server_config:
+            logger.info("Setting up MCP: name=%s", mcp_server_name)
+            try:
+                self._lifecycle_service.mcp_set(mcp_server_name, mcp_server_config)
+            except OpenClawLifecycleError as exc:
+                logger.warning("MCP setup failed, continuing: %s", exc)
+
+    def _onboard_openclaw(self, *, model_provider: str, api_key: str) -> None:
+        """使用 onboard 命令启动 openclaw runtime。"""
+        auth_choice = self.PROVIDER_TO_AUTH_CHOICE.get(model_provider, "deepseek-api-key")
+        
+        logger.info(
+            "Onboarding openclaw: provider=%s auth_choice=%s",
+            model_provider,
+            auth_choice,
+        )
+        
+        try:
+            self._lifecycle_service.onboard(
+                auth_choice=auth_choice,
+                api_key=api_key,
+                install_daemon=True,
+                skip_channels=True,
+                skip_search=True,
+                skip_hooks=True,
+            )
+        except OpenClawLifecycleError as exc:
+            raise AgentServiceError(
+                code="OPENCLAW_ONBOARD_FAILED",
+                message="openclaw onboard failed",
+                status_code=500,
+                details=self._lifecycle_error_details(exc),
+            ) from exc
 
     def status(self, *, agent_id: str | None = None) -> Agent:
         with self._lock:
@@ -155,39 +191,6 @@ class OpenClawAgentService(AgentServiceBase):
                 details=self._lifecycle_error_details(exc),
             ) from exc
 
-    def _materialize_spec(self, spec_path: Path) -> None:
-        """将 agent spec 物化到 runtime 工作目录。"""
-        try:
-            self._materializer.materialize(spec_path)
-        except SpecNotFoundError as exc:
-            raise AgentServiceError(
-                code="AGENT_SPEC_NOT_FOUND",
-                message="agent spec not found",
-                status_code=400,
-                details={"spec_path": str(exc.spec_path)},
-            ) from exc
-        except InvalidOpenClawSpecError as exc:
-            raise AgentServiceError(
-                code="AGENT_SPEC_INVALID",
-                message="agent spec is invalid",
-                status_code=400,
-                details={"spec_path": str(exc.spec_path)},
-            ) from exc
-        except OpenClawMaterializationError as exc:
-            raise AgentServiceError(
-                code="AGENT_SPEC_MATERIALIZE_FAILED",
-                message="agent spec materialization failed",
-                status_code=500,
-                details={"spec_path": str(exc.spec_path), "error": str(exc)},
-            ) from exc
-        except Exception as exc:
-            raise AgentServiceError(
-                code="AGENT_SPEC_MATERIALIZE_FAILED",
-                message="agent spec materialization failed",
-                status_code=500,
-                details={"spec_path": str(spec_path)},
-            ) from exc
-
     def _stop_openclaw(self) -> None:
         """重载前先停止旧 runtime，避免进程和端口残留。"""
         try:
@@ -196,18 +199,6 @@ class OpenClawAgentService(AgentServiceBase):
             raise AgentServiceError(
                 code="OPENCLAW_STOP_FAILED",
                 message="openclaw stop failed",
-                status_code=500,
-                details=self._lifecycle_error_details(exc),
-            ) from exc
-
-    def _start_openclaw(self) -> None:
-        """启动 openclaw runtime。"""
-        try:
-            self._lifecycle_service.start()
-        except OpenClawLifecycleError as exc:
-            raise AgentServiceError(
-                code="OPENCLAW_START_FAILED",
-                message="openclaw start failed",
                 status_code=500,
                 details=self._lifecycle_error_details(exc),
             ) from exc
