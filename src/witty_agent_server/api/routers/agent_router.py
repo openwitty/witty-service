@@ -46,14 +46,22 @@ def create_agent_router(
     resolved_opencode_skill_service = opencode_skill_service or OpenCodeSkillService()
 
     @router.post("/start", response_model=None)
-    def start_agent(
+    async def start_agent(
         request: Request,
         id: str | None = None,
-        reload: bool = False,
+        reload: bool = True,
     ) -> dict[str, Any] | JSONResponse:
         try:
+            body = await request.json()
+            config = {
+                "model_id": body.get("model_id"),
+                "model": body.get("model"),
+                "mcp_server_name": body.get("mcp_server_name"),
+                "mcp_server_config": body.get("mcp_server_config"),
+            }
             response = agent_service.start(
                 agent_id=id,
+                config=config,
                 reload=reload,
             ).model_dump()
             response["already_running"] = agent_service.last_start_already_running

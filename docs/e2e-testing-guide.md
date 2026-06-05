@@ -359,6 +359,9 @@ stateDiagram-v2
 | `idle_timeout_seconds` | integer | 是 | 空闲超时时间（秒），必须大于 0 |
 | `sandbox_id` | string | 否 | 沙箱 ID |
 | `has_scheduled_tasks` | boolean | 否 | 是否有定时任务，默认 `false` |
+| `model_id` | string | 否 | 模型 ID，关联 `/models` 中配置的模型 |
+| `mcp_server_name` | string | 否 | MCP Server 名称 |
+| `mcp_server_config` | object | 否 | MCP 配置（JSON 格式） |
 
 - 输出 `201`（AgentResponse）：
 
@@ -392,6 +395,9 @@ stateDiagram-v2
 | `workspace_path` | string | 工作区路径 |
 | `idle_timeout_seconds` | integer | 空闲超时时间 |
 | `has_scheduled_tasks` | boolean | 是否有定时任务 |
+| `model_id` | string \| null | 模型 ID |
+| `mcp_server_name` | string \| null | MCP Server 名称 |
+| `mcp_server_config` | object \| null | MCP 配置（JSON 格式） |
 | `created_at` | datetime | 创建时间 |
 | `updated_at` | datetime | 更新时间 |
 | `default_session_id` | string \| null | 默认会话 ID |

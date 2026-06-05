@@ -55,6 +55,9 @@ def create_agent(
             idle_timeout_seconds=payload.idle_timeout_seconds,
             sandbox_id=payload.sandbox_id,
             has_scheduled_tasks=payload.has_scheduled_tasks,
+            model_id=payload.model_id,
+            mcp_server_name=payload.mcp_server_name,
+            mcp_server_config=payload.mcp_server_config,
         )
     )
 
@@ -561,6 +564,9 @@ def _to_agent_response(
         workspace_path=agent.workspace_path,
         idle_timeout_seconds=agent.idle_timeout_seconds,
         has_scheduled_tasks=agent.has_scheduled_tasks,
+        model_id=agent.model_id,
+        mcp_server_name=agent.mcp_server_name,
+        mcp_server_config=agent.mcp_server_config,
         created_at=agent.created_at,
         updated_at=agent.updated_at,
         default_session_id=default_session_id,

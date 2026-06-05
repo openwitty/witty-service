@@ -70,6 +70,9 @@ class AgentCreateRequest:
     description: str = ""
     sandbox_id: str | None = None
     has_scheduled_tasks: bool = False
+    model_id: str | None = None
+    mcp_server_name: str | None = None
+    mcp_server_config: dict[str, Any] | None = None
 
 
 @dataclass(slots=True, frozen=True)
@@ -96,6 +99,9 @@ class AgentRepository(Protocol):
         status: AgentStatus = AgentStatus.creating,
         sandbox_id: str | None = None,
         has_scheduled_tasks: bool = False,
+        model_id: str | None = None,
+        mcp_server_name: str | None = None,
+        mcp_server_config: dict[str, Any] | None = None,
         last_active_at: Any | None = None,
     ) -> AgentRecord: ...
 
@@ -208,6 +214,8 @@ class AgentRepository(Protocol):
         agent_id: str,
         skills: list[dict[str, Any]],
     ) -> None: ...
+
+    def get_model(self, model_id: str) -> Any | None: ...
 
 
 class WorkspaceStore(Protocol):
@@ -556,10 +564,12 @@ class AgentManager:
 
             # 调用 /agent/start 启动 witty-agent-server 中的 agent
             logger.info(f"[AgentManager] Calling /agent/start...")
-            client = httpx.Client(base_url=adapter_endpoint.base_url, timeout=30.0)
+            client = httpx.Client(base_url=adapter_endpoint.base_url, timeout=120.0)
             try:
                 try:
-                    start_response = client.post("/agent/start", json={})
+                    start_payload = self._build_agent_start_payload(request)
+                    logger.info(f"[AgentManager] /agent/start payload: {start_payload}")
+                    start_response = client.post("/agent/start", json=start_payload)
                     start_response.raise_for_status()
                     logger.info(f"[AgentManager] /agent/start response: {start_response.status_code}")
                     started_agent = start_response.json()
@@ -630,6 +640,26 @@ class AgentManager:
                 cause=exc,
                 cleanup_errors=cleanup_errors,
             )
+
+    def _build_agent_start_payload(self, request: AgentCreateRequest) -> dict[str, Any]:
+        """构建 /agent/start 请求的 payload。"""
+        model = self._repository.get_model(request.model_id)
+        if model is not None:
+            model_info = {
+                "name": model.name,
+                "provider": model.provider,
+                "api_key": model.api_key,
+                "api_base_url": model.api_base_url,
+            }
+        else:
+            model_info = {}
+
+        return {
+            "model_id": request.model_id,
+            "model": model_info,
+            "mcp_server_name": request.mcp_server_name,
+            "mcp_server_config": request.mcp_server_config,
+        }
 
     def pause_agent(self, agent_id: str) -> AgentRecord:
         agent = self._get_agent(agent_id)
@@ -1346,6 +1376,9 @@ class AgentManager:
             status=AgentStatus.creating,
             sandbox_id=request.sandbox_id,
             has_scheduled_tasks=request.has_scheduled_tasks,
+            model_id=request.model_id,
+            mcp_server_name=request.mcp_server_name,
+            mcp_server_config=request.mcp_server_config,
         )
 
     def _maybe_prepend_interruption_prefix(self, session_id: str, content: str) -> str:

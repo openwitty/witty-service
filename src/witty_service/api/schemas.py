@@ -26,6 +26,9 @@ class CreateAgentRequest(BaseModel):
     idle_timeout_seconds: int = Field(gt=0)
     sandbox_id: str | None = None
     has_scheduled_tasks: bool = False
+    model_id: str | None = None
+    mcp_server_name: str | None = None
+    mcp_server_config: dict[str, Any] | None = None
 
 
 class SendMessageRequest(BaseModel):
@@ -67,6 +70,9 @@ class AgentResponse(BaseModel):
     workspace_path: str
     idle_timeout_seconds: int
     has_scheduled_tasks: bool
+    model_id: str | None = None
+    mcp_server_name: str | None = None
+    mcp_server_config: dict[str, Any] | None = None
     created_at: UtcDatetime
     updated_at: UtcDatetime
     default_session_id: str | None = None

@@ -53,11 +53,22 @@ class OpenClawGatewayClient(ClientBase):
     ) -> None:
         self._url = url
         logger.debug("OpenClawGatewayClient init token arg=%r", token)
-        self._token = token or self._resolve_gateway_token()
-        logger.debug("OpenClawGatewayClient init resolved token=%r", self._token)
+        self._token = token
+        logger.debug("OpenClawGatewayClient init token deferred to runtime")
         self._connect_timeout = connect_timeout
         self._event_timeout = event_timeout
         self._idle_timeout = idle_timeout
+
+    def _get_token(self) -> str | None:
+        """获取 gateway token，延迟解析直到实际使用时。
+        
+        因为 token 需要在 gateway 创建完成后才能获取到，
+        所以不在构造函数中解析，而是延迟到实际需要时。
+        """
+        if self._token is None:
+            self._token = self._resolve_gateway_token()
+            logger.debug("OpenClawGatewayClient resolved token=%r", self._token)
+        return self._token
 
     # 对接openclaw流式化接口，适用于长时间运行的对话，能够持续接收事件直到对话结束。
     def stream_turn(
@@ -352,8 +363,8 @@ class OpenClawGatewayClient(ClientBase):
         target["value"] = value
 
     def _open_connection(self) -> Any:
-        if not self._token:
-            logger.warning("_open_connection token check failed, token=%r", self._token)
+        if not self._get_token():
+            logger.warning("_open_connection token check failed, token=%r", self._get_token())
             raise OpenClawGatewayClientError(
                 code="GATEWAY_AUTH_MISSING",
                 message="openclaw gateway token not configured",
@@ -404,7 +415,7 @@ class OpenClawGatewayClient(ClientBase):
             "commands": [],
             "permissions": {},
             "caps": list(_DEFAULT_CAPS),
-            "auth": {"token": self._token},
+            "auth": {"token": self._get_token()},
             "locale": "zh-CN",
             "userAgent": "witty-agent-server/0.1.0",
         }
@@ -415,7 +426,7 @@ class OpenClawGatewayClient(ClientBase):
                 nonce=nonce,
                 role=role,
                 scopes=scopes,
-                signature_token=self._token,
+                signature_token=self._get_token(),
                 client_id="cli",
                 client_mode="cli",
                 platform="linux",
@@ -1000,7 +1011,7 @@ class OpenClawGatewayClient(ClientBase):
                     "approve",
                     "--latest",
                     "--token",
-                    self._token or "",
+                    self._get_token() or "",
                 ],
                 capture_output=True,
                 text=True,
