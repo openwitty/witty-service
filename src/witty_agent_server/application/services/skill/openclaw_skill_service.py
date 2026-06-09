@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import re
 import shutil
 import subprocess
@@ -17,6 +16,7 @@ from witty_agent_server.application.services.skill.errors import (
 from witty_agent_server.infra.ws.openclaw_gateway_client import (
     OpenClawGatewayClientError,
 )
+from witty_service.config import get_settings
 
 
 logger = logging.getLogger(__name__)
@@ -35,7 +35,7 @@ class OpenClawSkillService(AgentSkillServiceBase):
     ]
 
     _ALLOWED_SOURCE_BASES: list[Path] = [
-        Path(os.getenv("WITTY_WORKSPACE_BASE", "~/.witty")).expanduser() / "skill-repositories",
+        get_settings().workspace.root_path() / "skill-repositories",
     ]
 
     @classmethod

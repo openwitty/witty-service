@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import sys
 from logging.config import fileConfig
 from pathlib import Path
@@ -12,6 +11,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from witty_service.config import get_settings
 from witty_service.persistence.orm import Base
 
 config = context.config
@@ -19,7 +19,7 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-database_url = os.getenv("WITTY_DATABASE_URL")
+database_url = get_settings().database.url
 if database_url:
     config.set_main_option("sqlalchemy.url", database_url)
 

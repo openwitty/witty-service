@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import os
 from collections.abc import Callable
 
+from witty_service.config import get_settings
 from witty_service.domain.errors import DomainError
 from witty_service.sandbox.base import SANDBOX_NOT_SUPPORTED
 from witty_service.sandbox.base import SandboxBackend
@@ -13,21 +13,29 @@ from witty_service.sandbox.local_process import LocalProcessSandboxBackend
 
 SandboxBackendFactory = Callable[[], SandboxBackend]
 
+
+def _create_docker_backend() -> DockerSandboxBackend:
+    settings = get_settings()
+    return DockerSandboxBackend(
+        image=settings.docker.get_full_image_name(),
+        host=settings.docker.host,
+        container_port=settings.docker.container_port,
+        container_workspace_path=settings.docker.container_workspace_path,
+        stop_timeout=settings.docker.stop_timeout,
+    )
+
+
+def _create_local_process_backend() -> LocalProcessSandboxBackend:
+    settings = get_settings()
+    return LocalProcessSandboxBackend(
+        agent_server_app_dir=settings.workspace.agent_server_app_dir
+    )
+
+
 _SANDBOX_BACKEND_FACTORIES: dict[str, SandboxBackendFactory] = {
-    "docker": lambda: DockerSandboxBackend(
-        image=_docker_image_from_env(),
-        host=os.getenv("WITTY_DOCKER_HOST", "127.0.0.1"),
-        container_port=_docker_int_env("WITTY_DOCKER_CONTAINER_PORT", 8080),
-        container_workspace_path=os.getenv(
-            "WITTY_DOCKER_CONTAINER_WORKSPACE_PATH",
-            "/witty-workspace",
-        ),
-        stop_timeout=_docker_int_env("WITTY_DOCKER_STOP_TIMEOUT", 10),
-    ),
+    "docker": _create_docker_backend,
     "e2b": E2BSandboxBackend,
-    "local_process": lambda: LocalProcessSandboxBackend(
-        agent_server_app_dir=os.getenv("WITTY_AGENT_SERVER_APP_DIR")
-    ),
+    "local_process": _create_local_process_backend,
 }
 
 
@@ -50,31 +58,4 @@ def create_sandbox_backend(sandbox_type: str) -> SandboxBackend:
     return factory()
 
 
-def _docker_image_from_env() -> str:
-    image = os.getenv("WITTY_DOCKER_IMAGE", "witty-agent-server")
-    tag = os.getenv("WITTY_DOCKER_IMAGE_TAG", "latest")
-    if "@" in image or _docker_image_has_explicit_tag(image):
-        return image
-    return f"{image}:{tag}"
 
-
-def _docker_image_has_explicit_tag(image: str) -> bool:
-    last_segment = image.rsplit("/", 1)[-1]
-    return ":" in last_segment
-
-
-def _docker_int_env(name: str, default: int) -> int:
-    raw_value = os.getenv(name)
-    if raw_value is None:
-        return default
-    try:
-        return int(raw_value)
-    except ValueError as exc:
-        raise sandbox_start_failed(
-            sandbox_type="docker",
-            message=f"Invalid docker sandbox env: {name} must be an integer.",
-            details={
-                "env_var": name,
-                "value": raw_value,
-            },
-        ) from exc

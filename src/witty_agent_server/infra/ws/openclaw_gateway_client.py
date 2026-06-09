@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import time
 import uuid
 from collections.abc import Iterator
@@ -14,6 +13,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from websockets.exceptions import ConnectionClosed
 from websockets.sync.client import connect
 from witty_agent_server.infra.ws.client_base import ClientBase
+from witty_service.config import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -21,10 +21,10 @@ logger = logging.getLogger(__name__)
 DEFAULT_GATEWAY_WS_URL = "ws://127.0.0.1:18789"
 _DEFAULT_CONNECT_TIMEOUT = 10.0
 _DEFAULT_EVENT_TIMEOUT = 30.0
-_DEFAULT_IDLE_TIMEOUT = float(os.environ.get("OPENCLAW_GATEWAY_IDLE_TIMEOUT", "1200"))
-_DEFAULT_LIFECYCLE_END_DRAIN_TIMEOUT = float(
-    os.environ.get("OPENCLAW_GATEWAY_LIFECYCLE_END_DRAIN_TIMEOUT", "60")
-)
+
+_settings = get_settings()
+_DEFAULT_IDLE_TIMEOUT = _settings.openclaw_gateway.idle_timeout
+_DEFAULT_LIFECYCLE_END_DRAIN_TIMEOUT = _settings.openclaw_gateway.lifecycle_end_drain_timeout
 _DEFAULT_MIN_PROTOCOL = 3
 _DEFAULT_MAX_PROTOCOL = 4
 _DEFAULT_SCOPES = [
@@ -849,7 +849,7 @@ class OpenClawGatewayClient(ClientBase):
         return None
 
     def _state_dir(self) -> Path:
-        state_dir = os.environ.get("OPENCLAW_STATE_DIR")
+        state_dir = _settings.openclaw_gateway.state_dir
         if isinstance(state_dir, str) and state_dir:
             return Path(state_dir)
         return Path.home() / ".openclaw"

@@ -8,6 +8,7 @@ from typing import Any
 from witty_service.adapter.websocket_client_pool import WebSocketClientPool
 from witty_service.application.agent_manager import AGENT_NOT_FOUND, AgentManager
 from witty_service.application.session_manager import SessionManager
+from witty_service.config import get_settings
 from witty_service.domain.errors import DomainError
 from witty_service.persistence.db import create_session_factory, create_sqlite_engine, init_db
 from witty_service.persistence.repositories import SqliteRepository
@@ -64,9 +65,9 @@ def _ensure_dir_exists(database_url: str) -> None:
 
 
 def build_default_services() -> ServiceContainer:
-    _default_db_path = os.path.expanduser("~/.witty/db/witty_service.sqlite3")
-    database_url = os.getenv("WITTY_DATABASE_URL", f"sqlite:///{_default_db_path}")
-    workspace_base = os.getenv("WITTY_WORKSPACE_BASE", "~/.witty")
+    settings = get_settings()
+    database_url = settings.database.url
+    workspace_root = settings.workspace.root
 
     _ensure_dir_exists(database_url)
     engine = create_sqlite_engine(database_url)
@@ -74,5 +75,5 @@ def build_default_services() -> ServiceContainer:
 
     return ServiceContainer(
         repository=SqliteRepository(create_session_factory(engine)),
-        workspace_store=LocalWorkspaceStore(base_path=workspace_base),
+        workspace_store=LocalWorkspaceStore(base_path=workspace_root),
     )

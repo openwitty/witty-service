@@ -1,21 +1,22 @@
-import os
 from pathlib import Path
 
 from witty_agent_server.runtimes.runtime_base import RuntimeType
+from witty_service.config import get_settings
 
 
-WITTY_WORKSPACE_ROOT = os.environ.get("WITTY_WORKSPACE_ROOT", "~/.witty")
 AGENT_CONFIG_DIR_NAME = "agent-config"
 AGENT_SPEC_FILE_NAME = "agent-spec.yaml"
 OPENCLAW_TEMPLATE_FILE_NAME = "openclaw-template.json"
 
 
-def resolve_workspace_root(path: str = WITTY_WORKSPACE_ROOT) -> Path:
+def resolve_workspace_root(path: str | None = None) -> Path:
+    if path is None:
+        return get_settings().workspace.root_path()
     return Path(path).expanduser()
 
 
 class RuntimeWorkspaceResolver:
-    def __init__(self, project_root: Path | str = WITTY_WORKSPACE_ROOT) -> None:
+    def __init__(self, project_root: Path | str | None = None) -> None:
         self._project_root = (
             project_root
             if isinstance(project_root, Path)

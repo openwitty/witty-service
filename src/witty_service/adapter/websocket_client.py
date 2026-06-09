@@ -17,6 +17,17 @@ from witty_service.adapter.websocket_protocol import InboundEvent, OutboundMessa
 logger = logging.getLogger(__name__)
 
 
+def _log_prefix(session_id: str | None = None, url: str | None = None) -> str:
+    parts = []
+    if session_id:
+        parts.append(f"session_id={session_id}")
+    if url:
+        parts.append(f"url={url}")
+    if parts:
+        return f"[{', '.join(parts)}] "
+    return ""
+
+
 class WebSocketClient:
     def __init__(self, base_url: str) -> None:
         self._base_url = base_url.rstrip("/")
@@ -34,46 +45,41 @@ class WebSocketClient:
 
     async def connect(self, session_id: str) -> None:
         url = self._build_url(session_id)
+        prefix = _log_prefix(session_id=session_id, url=url)
         try:
-            # Keep behavior aligned with witty-agent-server/test.py default:
-            # disable client ping to avoid spurious disconnects on long-running turns.
             self._ws = await websockets.connect(url, ping_interval=None)
             self._connected = True
             self._session_id = session_id
             self._url = url
-            logger.info(
-                "WebSocket connected: client_id=%s session_id=%s url=%s",
-                id(self),
-                session_id,
-                url,
-            )
+            logger.info(f"{prefix}WebSocket connected: client_id=%s", id(self))
         except Exception as exc:
+            logger.error(f"{prefix}WebSocket connection failed: %s", exc)
             raise AdaptorConnectionError(
-                message="WebSocket connection failed",
+                message=f"WebSocket connection failed: {url}",
                 details={"url": url, "error": str(exc)},
             ) from exc
 
     async def disconnect(self) -> None:
         if self._ws:
-            logger.info(
-                "WebSocket disconnect requested: client_id=%s session_id=%s url=%s",
-                id(self),
-                self._session_id,
-                self._url,
-            )
+            prefix = _log_prefix(session_id=self._session_id, url=self._url)
+            logger.info(f"{prefix}WebSocket disconnect requested: client_id=%s", id(self))
             self._connected = False
             await self._ws.close()
             self._ws = None
 
     async def send(self, message: OutboundMessage) -> None:
         if not self._ws or not self._connected:
+            prefix = _log_prefix(session_id=self._session_id, url=self._url)
+            logger.warning(f"{prefix}Cannot send - WebSocket not connected")
             raise AdaptorSendFailed(
-                message="Cannot send - not connected",
+                message=f"Cannot send message - WebSocket not connected for session '{self._session_id}'",
                 details={},
             )
         try:
             await self._ws.send(json.dumps(message))
         except Exception as exc:
+            prefix = _log_prefix(session_id=self._session_id, url=self._url)
+            logger.error(f"{prefix}Failed to send WebSocket message: %s", exc)
             raise AdaptorSendFailed(
                 message="Failed to send WebSocket message",
                 details={"error": str(exc)},
@@ -81,8 +87,10 @@ class WebSocketClient:
 
     async def recv(self) -> AsyncIterator[InboundEvent]:
         if not self._ws or not self._connected:
+            prefix = _log_prefix(session_id=self._session_id, url=self._url)
+            logger.warning(f"{prefix}Cannot recv - WebSocket not connected")
             raise AdaptorReceiveError(
-                message="Cannot recv - not connected",
+                message=f"Cannot receive - WebSocket not connected for session '{self._session_id}'",
                 details={},
             )
         try:
@@ -91,7 +99,6 @@ class WebSocketClient:
                     data = json.loads(raw)
                     event_type = data.get("type", "")
 
-                    # client.error events may not have standard envelope fields
                     if event_type == "client.error":
                         yield InboundEvent(
                             type=event_type,
@@ -111,25 +118,23 @@ class WebSocketClient:
                             payload=data.get("payload", {}),
                         )
                 except (json.JSONDecodeError, KeyError) as exc:
+                    prefix = _log_prefix(session_id=self._session_id, url=self._url)
+                    logger.error(f"{prefix}Failed to parse WebSocket message: %s", exc)
                     raise AdaptorReceiveError(
-                        message="Failed to parse WebSocket message",
+                        message=f"Failed to parse WebSocket message: {exc}",
                         details={"error": str(exc), "raw": raw[:200]},
                     ) from exc
         except websockets.ConnectionClosed as exc:
             self._connected = False
-            logger.warning(
-                "WebSocket connection closed: client_id=%s session_id=%s url=%s code=%s reason=%s",
-                id(self),
-                self._session_id,
-                self._url,
-                getattr(exc, "code", None),
-                getattr(exc, "reason", None),
-            )
+            prefix = _log_prefix(session_id=self._session_id, url=self._url)
+            code = getattr(exc, "code", None)
+            reason = getattr(exc, "reason", None)
+            logger.warning(f"{prefix}WebSocket connection closed: code=%s reason=%s", code, reason)
             raise AdaptorReceiveError(
-                message="WebSocket connection closed before stream completed",
+                message=f"WebSocket connection closed unexpectedly for session '{self._session_id}'",
                 details={
-                    "code": getattr(exc, "code", None),
-                    "reason": getattr(exc, "reason", None),
+                    "code": code,
+                    "reason": reason,
                     "session_id": self._session_id,
                     "url": self._url,
                 },
@@ -137,12 +142,8 @@ class WebSocketClient:
         except AdaptorReceiveError:
             raise
         except Exception as exc:
-            logger.exception(
-                "WebSocket recv exception: client_id=%s session_id=%s url=%s",
-                id(self),
-                self._session_id,
-                self._url,
-            )
+            prefix = _log_prefix(session_id=self._session_id, url=self._url)
+            logger.exception(f"{prefix}WebSocket receive exception")
             raise AdaptorReceiveError(
                 message="WebSocket receive failed",
                 details={"error": str(exc)},

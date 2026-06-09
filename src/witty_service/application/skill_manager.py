@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
 import shutil
 import stat
@@ -21,6 +20,7 @@ from witty_service.application.awesome_openclaw_sync import (
     sync_awesome_openclaw_skills,
     AWESOME_REPO_URL
 )
+from witty_service.config import get_settings
 from witty_service.persistence.repositories import SkillRepositoryRecord, SkillRecord, SqliteRepository
 
 _logger = logging.getLogger(__name__)
@@ -42,8 +42,9 @@ class SkillManager:
     repository: SqliteRepository
 
     def __post_init__(self) -> None:
-        workspace_base = Path(os.getenv('WITTY_WORKSPACE_BASE', '~/.witty')).expanduser()
-        self._skill_archives_dir = workspace_base / 'skill-repositories'
+        settings = get_settings()
+        workspace_root = settings.workspace.root_path()
+        self._skill_archives_dir = workspace_root / 'skill-repositories'
         self._skill_archives_dir.mkdir(parents=True, exist_ok=True)
 
     def list_skill_repositories(self) -> list[SkillRepositoryRecord]:
