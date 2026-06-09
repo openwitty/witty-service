@@ -47,7 +47,8 @@ class BackportCvekitClient:
         raise RuntimeError("cvekit 不在 PATH 中")
 
     def _resolve_openclaw_config_path(self, config_path: str | Path | None) -> Path:
-        path = config_path or os.environ.get("OPENCLAW_CONFIG_PATH") or "~/.openclaw/openclaw.json"
+        from witty_service.config import get_settings
+        path = config_path or get_settings().openclaw.config_path or "~/.openclaw/openclaw.json"
         return Path(path).expanduser().resolve(strict=False)
 
     # ── LLM 配置 ───────────────────────────────────────────────

@@ -14,6 +14,7 @@ from witty_service.api.services import ServiceContainer, build_default_services
 from witty_service.api.skills import router as skills_router
 from witty_service.application.skill_manager import SkillManager
 from witty_service.config import get_settings
+from witty_service.logger import configure_logging
 from witty_agent_server.api.routers.agent_router import create_agent_router
 from witty_agent_server.api.routers.session_router import (
     build_default_session_service,
@@ -28,9 +29,8 @@ from witty_agent_server.application.services.session_ws_orchestrator import (
     SessionWSOrchestrator,
 )
 from witty_agent_server.application.services.task_pool import TaskPool
-from witty_agent_server.logger.logging_config import configure_logging
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+logger = logging.getLogger(__name__)
 
 
 def create_app(*, services: ServiceContainer | None = None) -> FastAPI:
@@ -52,10 +52,10 @@ def create_app(*, services: ServiceContainer | None = None) -> FastAPI:
     settings = get_settings()
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=settings.cors_origins,
-        allow_credentials=settings.cors_credentials,
-        allow_methods=settings.cors_methods,
-        allow_headers=settings.cors_headers,
+        allow_origins=settings.cors.origins,
+        allow_credentials=settings.cors.credentials,
+        allow_methods=settings.cors.methods,
+        allow_headers=settings.cors.headers,
     )
 
     @app.get("/healthz")

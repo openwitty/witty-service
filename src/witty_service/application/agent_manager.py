@@ -14,6 +14,17 @@ from uuid import NAMESPACE_URL, uuid4, uuid5
 
 logger = logging.getLogger(__name__)
 
+
+def _log_prefix(agent_id: str | None = None, session_id: str | None = None) -> str:
+    parts = []
+    if agent_id:
+        parts.append(f"agent_id={agent_id}")
+    if session_id:
+        parts.append(f"session_id={session_id}")
+    if parts:
+        return f"[{', '.join(parts)}] "
+    return ""
+
 from sqlalchemy import false
 from witty_service.adapter.http_client import AdaptorHttpClient
 from witty_service.adapter.websocket_client_pool import AdaptorEndpoint, WebSocketClientPool
@@ -507,9 +518,10 @@ class AgentManager:
 
     def create_agent(self, request: AgentCreateRequest) -> AgentCreateResult:
         agent_id = str(uuid4())
-        logger.info(f"[AgentManager] Creating agent: {request.name}, agent_id: {agent_id}")
+        prefix = _log_prefix(agent_id=agent_id)
+        logger.info(f"{prefix}Creating agent: name=%s sandbox_type=%s", request.name, request.sandbox_type)
         workspace_path = str(self._workspace_store.init_workspace(agent_id))
-        logger.info(f"[AgentManager] Workspace path: {workspace_path}")
+        logger.info(f"{prefix}Workspace initialized: path=%s", workspace_path)
         sandbox_handle: SandboxHandle | None = None
         try:
             self._create_agent_record(
@@ -517,88 +529,83 @@ class AgentManager:
                 request=request,
                 workspace_path=workspace_path,
             )
-            logger.info(f"[AgentManager] Agent record created, starting sandbox...")
+            logger.info(f"{prefix}Agent record created, starting sandbox...")
             sandbox_handle = self._sandbox_backend.start(
                 agent_id=agent_id,
                 workspace_path=workspace_path,
             )
-            logger.info(f"[AgentManager] Sandbox started, handle: {sandbox_handle}")
+            logger.info(f"{prefix}Sandbox started: sandbox_id=%s", sandbox_handle.sandbox_id)
             adapter_endpoint = self._sandbox_backend.endpoint(sandbox_handle)
-            logger.info(f"[AgentManager] Adapter endpoint: {adapter_endpoint.base_url}")
+            logger.info(f"{prefix}Adapter endpoint ready: url=%s", adapter_endpoint.base_url)
             sandbox_payload = self._sandbox_handle_payload(sandbox_handle)
-            logger.info(f"[AgentManager] Sandbox payload: {sandbox_payload}")
             self._repository.save_sandbox_state(
                 agent_id,
                 sandbox_payload_json=sandbox_payload,
                 adapter_base_url=adapter_endpoint.base_url,
                 adapter_ready=True,
             )
-            logger.info(f"[AgentManager] Sandbox state saved to database")
+            logger.info(f"{prefix}Sandbox state saved to database")
 
-            # 等待适配器就绪（同步等待 /ping）
-            logger.info(f"[AgentManager] Waiting for sandbox to be ready...")
+            logger.info(f"{prefix}Waiting for sandbox health check...")
             client: httpx.Client | None = None
-            for i in range(30):  # 30 秒超时
+            for i in range(30):
                 try:
                     client = httpx.Client(base_url=adapter_endpoint.base_url, timeout=5.0)
                     response = client.get("/ping")
                     if response.status_code == 200:
-                        logger.info(f"[AgentManager] Sandbox is ready after {i+1} attempts")
+                        logger.info(f"{prefix}Sandbox ready after %d attempts", i + 1)
                         break
                 except Exception as exc:
-                    logger.info(f"[AgentManager] Health check attempt {i+1} failed: {exc}")
+                    logger.debug(f"{prefix}Health check attempt %d failed: %s", i + 1, exc)
                     pass
                 finally:
                     if client is not None:
                         client.close()
                 time.sleep(1)
             else:
-                logger.error(f"[AgentManager] Sandbox health check timeout after 30 attempts")
+                logger.error(f"{prefix}Sandbox health check timeout after 30 attempts")
                 raise DomainError(
                     code=AGENT_CREATE_FAILED,
                     message="Sandbox health check timeout.",
                     details={"agent_id": agent_id},
                 )
 
-            # 调用 /agent/start 启动 witty-agent-server 中的 agent
-            logger.info(f"[AgentManager] Calling /agent/start...")
+            logger.info(f"{prefix}Calling /agent/start...")
             client = httpx.Client(base_url=adapter_endpoint.base_url, timeout=120.0)
             try:
-                try:
-                    start_payload = self._build_agent_start_payload(request)
-                    logger.info(f"[AgentManager] /agent/start payload: {start_payload}")
-                    start_response = client.post("/agent/start", json=start_payload)
-                    start_response.raise_for_status()
-                    logger.info(f"[AgentManager] /agent/start response: {start_response.status_code}")
-                    started_agent = start_response.json()
-                    remote_runtime_agent_id = started_agent.get("id")
-                    if not isinstance(remote_runtime_agent_id, str) or not remote_runtime_agent_id:
-                        raise DomainError(
-                            code=AGENT_CREATE_FAILED,
-                            message="Started agent response missing runtime agent id.",
-                            details={"agent_id": agent_id},
-                        )
-                except httpx.HTTPStatusError as exc:
-                    logger.error(f"[AgentManager] /agent/start failed: {exc}")
+                start_payload = self._build_agent_start_payload(request)
+                logger.debug(f"{prefix}/agent/start payload: %s", start_payload)
+                start_response = client.post("/agent/start", json=start_payload)
+                start_response.raise_for_status()
+                logger.info(f"{prefix}/agent/start succeeded: status=%d", start_response.status_code)
+                started_agent = start_response.json()
+                remote_runtime_agent_id = started_agent.get("id")
+                if not isinstance(remote_runtime_agent_id, str) or not remote_runtime_agent_id:
                     raise DomainError(
                         code=AGENT_CREATE_FAILED,
-                        message="Failed to start agent.",
-                        details={"agent_id": agent_id, "error": str(exc)},
-                    ) from exc
+                        message="Started agent response missing runtime agent id.",
+                        details={"agent_id": agent_id},
+                    )
+            except httpx.HTTPStatusError as exc:
+                logger.error(f"{prefix}/agent/start failed: %s", exc)
+                raise DomainError(
+                    code=AGENT_CREATE_FAILED,
+                    message="Failed to start agent.",
+                    details={"agent_id": agent_id, "error": str(exc)},
+                ) from exc
             finally:
                 client.close()
 
-            # 调用 /agent/sessions 在 witty-agent-server 创建 session
-            logger.info(f"[AgentManager] Calling /agent/sessions...")
+            logger.info(f"{prefix}Calling /agent/sessions...")
             client = httpx.Client(base_url=adapter_endpoint.base_url, timeout=30.0)
             try:
                 response = client.post(f"/agents/{remote_runtime_agent_id}/sessions", json={})
                 response.raise_for_status()
-                logger.info(f"[AgentManager] /agent/sessions response: {response.status_code}")
+                logger.info(f"{prefix}/agent/sessions succeeded: status=%d", response.status_code)
                 session_data = response.json()
-                logger.info(f"[AgentManager] Session data: {session_data}")
+                logger.debug(f"{prefix}Session data: %s", session_data)
             except httpx.HTTPStatusError as exc:
-                logger.error(f"[AgentManager] /agent/sessions failed: {exc}")
+                logger.error(f"{prefix}/agent/sessions failed: %s", exc)
                 raise DomainError(
                     code=AGENT_CREATE_FAILED,
                     message="Failed to create session on agent.",
@@ -611,14 +618,12 @@ class AgentManager:
                 agent_id,
                 AgentStatus.running,
             )
-            logger.info(f"[AgentManager] Agent status updated to running, creation complete")
+            logger.info(f"{prefix}Agent creation complete: status=running")
             return AgentCreateResult(
                 agent=replace(running_agent, workspace_path=workspace_path),
             )
         except Exception as exc:
-            logger.error(f"[AgentManager] Agent creation failed with error: {exc}")
-            logger.error(f"[AgentManager] Exception type: {type(exc).__name__}")
-            logger.error(f"[AgentManager] Exception traceback:", exc_info=True)
+            logger.error(f"{prefix}Agent creation failed: error=%s", exc, exc_info=True)
             cleanup_errors: list[dict[str, str]] = []
             if sandbox_handle is not None:
                 self._collect_error(

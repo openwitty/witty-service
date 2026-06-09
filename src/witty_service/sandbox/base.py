@@ -87,6 +87,7 @@ def sandbox_not_supported(*, sandbox_type: str, operation: str) -> DomainError:
     return DomainError(
         code=SANDBOX_NOT_SUPPORTED,
         message="Sandbox backend is not supported yet.",
+        status_code=400,
         details={
             "sandbox_type": sandbox_type,
             "operation": operation,
@@ -98,6 +99,7 @@ def sandbox_not_found(*, sandbox_type: str, sandbox_id: str) -> DomainError:
     return DomainError(
         code=SANDBOX_NOT_FOUND,
         message="Sandbox handle was not found.",
+        status_code=404,
         details={
             "sandbox_type": sandbox_type,
             "sandbox_id": sandbox_id,
@@ -118,6 +120,7 @@ def sandbox_start_failed(
     return DomainError(
         code=SANDBOX_START_FAILED,
         message=message,
+        status_code=500,
         details=payload,
     )
 
@@ -135,5 +138,6 @@ def sandbox_stop_failed(
     return DomainError(
         code=SANDBOX_STOP_FAILED,
         message=message,
+        status_code=500,
         details=payload,
     )

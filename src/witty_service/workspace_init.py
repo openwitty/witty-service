@@ -1,15 +1,16 @@
 import logging
-import os
 import tarfile
 from pathlib import Path
 from pkgutil import get_data
+
+from witty_service.config import get_settings
 
 logger = logging.getLogger(__name__)
 
 
 def init_workspace(workspace_root: str | None = None) -> Path:
     if workspace_root is None:
-        workspace_root = os.environ.get("WITTY_WORKSPACE_ROOT", "~/.witty")
+        workspace_root = get_settings().workspace.root
     
     workspace_path = Path(workspace_root).expanduser()
     

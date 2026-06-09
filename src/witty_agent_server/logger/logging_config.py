@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import logging
-import os
+
+from witty_service.config import get_settings
 
 
 def configure_logging() -> None:
     """初始化全局日志配置。重复调用时不覆盖已有 handler。"""
-    level_name = os.getenv("WITTY_LOG_LEVEL", "INFO").upper()
+    settings = get_settings()
+    level_name = settings.logging.level
     level = getattr(logging, level_name, logging.INFO)
     root_logger = logging.getLogger()
     if root_logger.handlers:

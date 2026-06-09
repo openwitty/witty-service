@@ -10,23 +10,6 @@ def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(DomainError)
     async def _domain_error_handler(_: Request, exc: DomainError) -> JSONResponse:
         return JSONResponse(
-            status_code=_status_code_for_domain_error(exc),
+            status_code=exc.status_code,
             content={"error": exc.to_payload().to_dict()},
         )
-
-
-def _status_code_for_domain_error(exc: DomainError) -> int:
-    code = exc.code
-    if code == "CVE_GITCODE_TOKEN_INVALID":
-        return 401
-    if code.endswith("_NOT_FOUND"):
-        return 404
-    if code.endswith("_NOT_SUPPORTED"):
-        return 400
-    if code.endswith("_MISMATCH"):
-        return 400
-    if code.startswith("INVALID_"):
-        return 409
-    if code.endswith("_FAILED"):
-        return 500
-    return 400
