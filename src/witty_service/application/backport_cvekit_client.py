@@ -51,9 +51,9 @@ class BackportCvekitClient:
         path = config_path or get_settings().openclaw.config_path or "~/.openclaw/openclaw.json"
         return Path(path).expanduser().resolve(strict=False)
 
-    # ── LLM 配置 ───────────────────────────────────────────────
+    # ── cvekit MCP 配置 ────────────────────────────────────────
 
-    def _get_llm_config(self) -> dict[str, str]:
+    def _get_cvekit_mcp_config(self) -> tuple[list[Any], dict[str, Any]]:
         config_path = self._openclaw_config_path
         try:
             with config_path.open("r", encoding="utf-8") as handle:
@@ -75,14 +75,11 @@ class BackportCvekitClient:
         env_config = mcp_config.get("env") or {}
         if not isinstance(env_config, dict):
             env_config = {}
+        return args, env_config
 
+    @staticmethod
+    def _parse_option_values(args: list[Any], option_names: set[str]) -> dict[str, str]:
         arg_values: dict[str, str] = {}
-        option_names = {
-            "--llm-provider",
-            "--api-key",
-            "--llm-base-url",
-            "--llm-model-name",
-        }
         index = 0
         while index < len(args):
             item = str(args[index]).strip()
@@ -100,7 +97,13 @@ class BackportCvekitClient:
                         arg_values[option_name] = value
                     break
             index += 1
+        return arg_values
 
+    def _get_llm_config(
+        self,
+        arg_values: dict[str, str],
+        env_config: dict[str, Any],
+    ) -> dict[str, str]:
         selected_provider = (
             arg_values.get("--llm-provider")
             or str(env_config.get("LLM_PROVIDER") or "").strip()
@@ -121,9 +124,15 @@ class BackportCvekitClient:
             or str(env_config.get("MODEL_NAME") or "").strip()
         )
         if not selected_provider:
-            raise RuntimeError(f"openclaw.json cvekit_mcp 缺少 --llm-provider 或 LLM_PROVIDER: {config_path}")
+            raise RuntimeError(
+                "openclaw.json cvekit_mcp 缺少 --llm-provider 或 LLM_PROVIDER: "
+                f"{self._openclaw_config_path}"
+            )
         if not api_key:
-            raise RuntimeError(f"openclaw.json cvekit_mcp 缺少 --api-key 或 API_KEY: {config_path}")
+            raise RuntimeError(
+                "openclaw.json cvekit_mcp 缺少 --api-key 或 API_KEY: "
+                f"{self._openclaw_config_path}"
+            )
 
         return {
             "provider": selected_provider,
@@ -134,7 +143,7 @@ class BackportCvekitClient:
 
     # ── 通用工具 ────────────────────────────────────────────────
 
-    def _build_env(self) -> dict[str, str]:
+    def _build_env(self, mcp_env: dict[str, Any]) -> dict[str, str]:
         cvekit_bin_dir = self._resolve_cvekit().parent
         env: dict[str, str] = {
             "PATH": os.pathsep.join(
@@ -151,21 +160,39 @@ class BackportCvekitClient:
             value = os.environ.get(key)
             if value:
                 env[key] = value
+        joern_path = str(
+            mcp_env.get("JOERN_PATH") or os.environ.get("JOERN_PATH") or ""
+        ).strip()
+        if joern_path:
+            env["JOERN_PATH"] = joern_path
         return env
 
-    def _run_cvekit(self, args: list[str], env: dict[str, str], cwd: Path) -> subprocess.CompletedProcess[str]:
+    def _run_cvekit(self, args: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
         cmd_args = list(args)
         existing_options = {
             item.split("=", 1)[0]
             for item in cmd_args
             if isinstance(item, str) and item.startswith("--")
         }
-        llm_config = self._get_llm_config()
+        mcp_args, mcp_env = self._get_cvekit_mcp_config()
+        mcp_options = self._parse_option_values(
+            mcp_args,
+            {
+                "--llm-provider",
+                "--api-key",
+                "--llm-base-url",
+                "--llm-model-name",
+                "--backport-engine",
+            },
+        )
+        llm_config = self._get_llm_config(mcp_options, mcp_env)
+        env = self._build_env(mcp_env)
         for option, value in (
             ("--llm-provider", llm_config.get("provider")),
             ("--llm-base-url", llm_config.get("base_url")),
             ("--llm-model-name", llm_config.get("model_name")),
             ("--api-key", llm_config.get("api_key")),
+            ("--backport-engine", mcp_options.get("--backport-engine")),
         ):
             if value and option not in existing_options:
                 cmd_args.extend([option, value])
@@ -404,7 +431,6 @@ class BackportCvekitClient:
         commits: list[dict[str, Any]],
         run_prefix: str,
     ) -> tuple[Path, dict[str, Any], list[dict[str, Any]]]:
-        env = self._build_env()
         self._runs_root.mkdir(parents=True, exist_ok=True)
         run_dir = Path(
             tempfile.mkdtemp(
@@ -422,7 +448,6 @@ class BackportCvekitClient:
                 "--debug", "--json",
                 "--stop-at-first-conflict",
             ],
-            env,
             run_dir,
         )
         updated_report_data, updated_commits = self._read_report(report_config_path)
@@ -487,8 +512,6 @@ class BackportCvekitClient:
         linux_repo_path: str,
         commit_sort: str = "describe",
     ) -> dict[str, Any]:
-        env = self._build_env()
-
         excel = Path(excel_path).expanduser().resolve()
         if not excel.exists():
             raise FileNotFoundError(f"excel_path 不存在: {excel}")
@@ -537,7 +560,7 @@ class BackportCvekitClient:
              "--backport-excel", str(excel),
              "-o", str(config_path),
              "--backport-config", str(base_config_path)],
-            env, run_dir,
+            run_dir,
         )
 
         self._run_cvekit(
@@ -545,7 +568,7 @@ class BackportCvekitClient:
             "--backport-config", str(config_path),
             "--debug", "--json",
             "--stop-at-first-conflict"],
-            env, run_dir,
+            run_dir,
         )
 
         if not report_path.exists():
@@ -750,7 +773,6 @@ class BackportCvekitClient:
         linux_repo_path: str,
         working_report_path: str | None = None,
     ) -> dict[str, Any]:
-        env = self._build_env()
         base_path = Path(base_report_path).expanduser().resolve()
         if not base_path.exists():
             raise FileNotFoundError(f"base_report_path 不存在: {base_path}")
@@ -823,7 +845,7 @@ class BackportCvekitClient:
             "--backport-config", str(filtered_report_path),
             "-e", "--debug", "--json",
         ]
-        result = self._run_cvekit(cmd, env, filtered_report_path.parent)
+        result = self._run_cvekit(cmd, filtered_report_path.parent)
         combined_output = "\n".join(part for part in [result.stdout, result.stderr] if part)
 
         _, commits = self._read_report(filtered_report_path)
@@ -971,7 +993,6 @@ class BackportCvekitClient:
         linux_repo_path: str,
         working_report_path: str | None = None,
     ) -> dict[str, Any]:
-        env = self._build_env()
         base_path = Path(base_report_path).expanduser().resolve()
         if not base_path.exists():
             raise FileNotFoundError(f"base_report_path 不存在: {base_path}")
@@ -1015,7 +1036,7 @@ class BackportCvekitClient:
             ["--action", "backport-batch",
              "--backport-config", str(apply_config_path), "--debug", "--json",
              "--apply", apply_value],
-            env, apply_config_path.parent,
+            apply_config_path.parent,
         )
         apply_result = self._parse_json_output(result.stdout)
 
@@ -1051,7 +1072,6 @@ class BackportCvekitClient:
         linux_repo_path: str,
         working_report_path: str | None = None,
     ) -> dict[str, Any]:
-        env = self._build_env()
         base_path = Path(base_report_path).expanduser().resolve()
         if not base_path.exists():
             raise FileNotFoundError(f"base_report_path 不存在: {base_path}")
@@ -1081,7 +1101,7 @@ class BackportCvekitClient:
             cmd.extend(["--commit-message-source", commit_message_source])
         if linux_repo_path.strip():
             cmd.extend(["--linux-repo-path", linux_repo_path.strip()])
-        result = self._run_cvekit(cmd, env, preview_config_path.parent)
+        result = self._run_cvekit(cmd, preview_config_path.parent)
         preview_result = self._parse_json_output(result.stdout)
         if preview_result.get("status") != "success":
             raise RuntimeError(str(preview_result.get("error") or preview_result))
