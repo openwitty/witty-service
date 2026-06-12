@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 DEFAULT_GATEWAY_WS_URL = "ws://127.0.0.1:18789"
+_DEFAULT_GATEWAY_PORT = 18789
 _DEFAULT_CONNECT_TIMEOUT = 10.0
 _DEFAULT_EVENT_TIMEOUT = 30.0
 
@@ -49,17 +50,25 @@ class OpenClawGatewayClient(ClientBase):
     def __init__(
         self,
         *,
-        url: str = DEFAULT_GATEWAY_WS_URL,
+        url: str | None = None,
         token: str | None = None,
+        profile: str | None = None,
+        gateway_port: int | None = None,
         connect_timeout: float = _DEFAULT_CONNECT_TIMEOUT,
         event_timeout: float = _DEFAULT_EVENT_TIMEOUT,
         idle_timeout: float = _DEFAULT_IDLE_TIMEOUT,
         lifecycle_end_drain_timeout: float = _DEFAULT_LIFECYCLE_END_DRAIN_TIMEOUT,
     ) -> None:
+        if url is None:
+            port = gateway_port or _DEFAULT_GATEWAY_PORT
+            url = f"ws://127.0.0.1:{port}"
+
         self._url = url
         logger.debug("OpenClawGatewayClient init token arg=%r", token)
         self._token = token
         logger.debug("OpenClawGatewayClient init token deferred to runtime")
+        self._profile = profile
+        self._gateway_port = gateway_port
         self._connect_timeout = connect_timeout
         self._event_timeout = event_timeout
         self._idle_timeout = idle_timeout
@@ -849,10 +858,16 @@ class OpenClawGatewayClient(ClientBase):
         return None
 
     def _state_dir(self) -> Path:
+        base_name = ".openclaw" if not self._profile else f".openclaw-{self._profile}"
         state_dir = _settings.openclaw_gateway.state_dir
+
         if isinstance(state_dir, str) and state_dir:
-            return Path(state_dir)
-        return Path.home() / ".openclaw"
+            path = Path(state_dir)
+            if self._profile:
+                path = path.parent / f"{path.name}-{self._profile}"
+            return path
+
+        return Path.home() / base_name
 
     def _identity_dir(self) -> Path:
         return self._state_dir() / "identity"

@@ -120,9 +120,13 @@ class TaskPool:
                 event = await queue.get()
                 if event is None:
                     break
+                # 在转发 terminal 事件前释放 inflight 锁，让后续消息可以立即提交
+                if event.get("type") in {"message.completed", "turn.completed"}:
+                    async with self._lock:
+                        self._inflight_sessions.discard(session_scope)
                 await on_event(event)
         finally:
             async with self._lock:
-                self._inflight_sessions.discard(session_scope)
+                self._inflight_sessions.discard(session_scope)  # no-op if already released above
             self._cancel_events.pop(session_scope, None)
             await producer_future

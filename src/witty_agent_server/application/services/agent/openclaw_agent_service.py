@@ -50,10 +50,21 @@ class OpenClawAgentService(AgentServiceBase):
         lifecycle_service: OpenClawLifecyclePort | None = None,
         gateway_agent_client: GatewayAgentClientPort | None = None,
         runtime: RuntimeType = "openclaw",
+        *,
+        profile: str | None = None,
+        gateway_port: int | None = None,
     ) -> None:
         super().__init__(agent=agent, runtime=runtime)
-        self._lifecycle_service = lifecycle_service or OpenClawLifecycleService()
-        self._gateway_agent_client = gateway_agent_client or OpenClawGatewayClient()
+        self._lifecycle_service = lifecycle_service or OpenClawLifecycleService(
+            profile=profile,
+            gateway_port=gateway_port,
+        )
+        self._gateway_agent_client = gateway_agent_client or OpenClawGatewayClient(
+            profile=profile,
+            gateway_port=gateway_port,
+        )
+        self._profile = profile
+        self._gateway_port = gateway_port
 
     def start(
         self,
@@ -67,14 +78,18 @@ class OpenClawAgentService(AgentServiceBase):
         使用 onboard 命令启动，支持根据模型提供商选择不同的认证方式。
         """
         with self._lock:
+            profile = config.get("profile") if config else None
+            gateway_port = config.get("gateway_port") if config else None
 
             is_running = self._probe_openclaw_running()
             logger.info(
-                "agent start requested: agent_id=%s runtime=%s reload=%s running=%s",
+                "agent start requested: agent_id=%s runtime=%s reload=%s running=%s profile=%s gateway_port=%s",
                 agent_id,
                 self._runtime,
                 reload,
                 is_running,
+                profile,
+                gateway_port,
             )
 
             if is_running and not reload:
@@ -98,7 +113,12 @@ class OpenClawAgentService(AgentServiceBase):
             model_provider = config.get("model", {}).get("provider", "") if config else ""
             api_key = config.get("model", {}).get("api_key", "") if config else ""
 
-            self._onboard_openclaw(model_provider=model_provider, api_key=api_key)
+            self._onboard_openclaw(
+                model_provider=model_provider,
+                api_key=api_key,
+                profile=profile,
+                gateway_port=gateway_port,
+            )
 
             resolved_agent_id, configured_agent = self._resolve_target_agent(
                 requested_agent_id=agent_id
@@ -158,18 +178,32 @@ class OpenClawAgentService(AgentServiceBase):
             self._ensure_agent_context(agent_id=agent_id)
             self._unset_mcp(mcp_server_name)
 
-    def _onboard_openclaw(self, *, model_provider: str, api_key: str) -> None:
+    def _onboard_openclaw(
+        self,
+        *,
+        model_provider: str,
+        api_key: str,
+        profile: str | None,
+        gateway_port: int | None,
+    ) -> None:
         """使用 onboard 命令启动 openclaw runtime。"""
         auth_choice = self.PROVIDER_TO_AUTH_CHOICE.get(model_provider, "deepseek-api-key")
         
+        lifecycle_service = OpenClawLifecycleService(
+            profile=profile,
+            gateway_port=gateway_port,
+        )
+        
         logger.info(
-            "Onboarding openclaw: provider=%s auth_choice=%s",
+            "Onboarding openclaw: provider=%s auth_choice=%s profile=%s gateway_port=%s",
             model_provider,
             auth_choice,
+            profile,
+            gateway_port,
         )
         
         try:
-            self._lifecycle_service.onboard(
+            lifecycle_service.onboard(
                 auth_choice=auth_choice,
                 api_key=api_key,
                 install_daemon=True,

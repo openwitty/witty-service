@@ -337,6 +337,37 @@ class AgentManager:
         self._ws_client_pool = ws_client_pool or WebSocketClientPool()
         self._logger = logging.getLogger(__name__)
 
+    def _find_free_port(self) -> int:
+        import socket
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.bind(("127.0.0.1", 0))
+            return int(sock.getsockname()[1])
+
+    def _is_port_in_use(self, port: int) -> bool:
+        import socket
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            try:
+                sock.bind(("127.0.0.1", port))
+                return False
+            except OSError:
+                return True
+
+    def _get_available_gateway_port(self, preferred_port: int | None) -> int:
+        if preferred_port is not None and not self._is_port_in_use(preferred_port):
+            return preferred_port
+        return self._find_free_port()
+
+    def _get_agent_profile(self, agent_id: str) -> str:
+        return agent_id
+
+    def _get_agent_gateway_port(self, agent_id: str) -> int | None:
+        sandbox_state = self._repository.get_sandbox_state(agent_id)
+        if sandbox_state is None:
+            return None
+        metadata = sandbox_state.sandbox_payload_json.get("metadata", {})
+        port = metadata.get("gateway_port")
+        return int(port) if isinstance(port, int) else None
+
     def list_agent_skills(self, agent_id: str) -> list[dict[str, Any]]:
         """查询当前 agent 对应 runtime 支持的 skills。"""
         builtin_skills = self._fetch_agent_skills_from_runtime(agent_id)
@@ -526,6 +557,11 @@ class AgentManager:
         agent_id = str(uuid4())
         prefix = _log_prefix(agent_id=agent_id)
         logger.info(f"{prefix}Creating agent: name=%s sandbox_type=%s", request.name, request.sandbox_type)
+        
+        profile_name = agent_id
+        gateway_port = self._find_free_port()
+        logger.info(f"{prefix}Using profile: {profile_name}, gateway_port: {gateway_port}")
+        
         workspace_path = str(self._workspace_store.init_workspace(agent_id))
         logger.info(f"{prefix}Workspace initialized: path=%s", workspace_path)
         sandbox_handle: SandboxHandle | None = None
@@ -539,11 +575,14 @@ class AgentManager:
             sandbox_handle = self._sandbox_backend.start(
                 agent_id=agent_id,
                 workspace_path=workspace_path,
+                profile=profile_name,
+                gateway_port=gateway_port,
             )
             logger.info(f"{prefix}Sandbox started: sandbox_id=%s", sandbox_handle.sandbox_id)
             adapter_endpoint = self._sandbox_backend.endpoint(sandbox_handle)
             logger.info(f"{prefix}Adapter endpoint ready: url=%s", adapter_endpoint.base_url)
             sandbox_payload = self._sandbox_handle_payload(sandbox_handle)
+            sandbox_payload["metadata"]["gateway_port"] = gateway_port
             self._repository.save_sandbox_state(
                 agent_id,
                 sandbox_payload_json=sandbox_payload,
@@ -579,7 +618,7 @@ class AgentManager:
             logger.info(f"{prefix}Calling /agent/start...")
             client = httpx.Client(base_url=adapter_endpoint.base_url, timeout=120.0)
             try:
-                start_payload = self._build_agent_start_payload(request)
+                start_payload = self._build_agent_start_payload(request, profile_name, gateway_port)
                 logger.debug(f"{prefix}/agent/start payload: %s", start_payload)
                 start_response = client.post("/agent/start", json=start_payload)
                 start_response.raise_for_status()
@@ -650,7 +689,12 @@ class AgentManager:
                 cleanup_errors=cleanup_errors,
             )
 
-    def _build_agent_start_payload(self, request: AgentCreateRequest) -> dict[str, Any]:
+    def _build_agent_start_payload(
+        self,
+        request: AgentCreateRequest,
+        profile: str,
+        gateway_port: int,
+    ) -> dict[str, Any]:
         """构建 /agent/start 请求的 payload。"""
         model = self._repository.get_model(request.model_id)
         if model is not None:
@@ -666,6 +710,8 @@ class AgentManager:
         return {
             "model_id": request.model_id,
             "model": model_info,
+            "profile": profile,
+            "gateway_port": gateway_port,
         }
 
     def pause_agent(self, agent_id: str) -> AgentRecord:
@@ -801,18 +847,32 @@ class AgentManager:
         prefix = _log_prefix(agent_id=agent_id)
         logger.info(f"{prefix}Resuming agent from running state (service restart recovery)")
 
-        # 1. 重新启动沙箱
+        # 获取隔离参数
+        profile_name = agent_id
+        saved_gateway_port = self._get_agent_gateway_port(agent_id)
+        
+        # 检查端口是否被占用，如果被占用则分配新端口
+        gateway_port = self._get_available_gateway_port(saved_gateway_port)
+        if saved_gateway_port is not None and gateway_port != saved_gateway_port:
+            logger.warning(f"{prefix}Saved gateway port {saved_gateway_port} is in use, using new port {gateway_port}")
+
+        # 1. 重新启动沙箱（传递隔离参数）
         sandbox_handle = self._sandbox_backend.start(
             agent_id=agent_id,
             workspace_path=agent.workspace_path,
+            profile=profile_name,
+            gateway_port=gateway_port,
         )
         adapter_endpoint = self._sandbox_backend.endpoint(sandbox_handle)
-        logger.info(f"{prefix}Sandbox restarted: base_url=%s", adapter_endpoint.base_url)
+        logger.info(f"{prefix}Sandbox restarted: base_url=%s profile=%s gateway_port=%s",
+                    adapter_endpoint.base_url, profile_name, gateway_port)
 
-        # 2. 保存沙箱状态
+        # 2. 保存沙箱状态（包含 gateway_port）
+        sandbox_payload = self._sandbox_handle_payload(sandbox_handle)
+        sandbox_payload["metadata"]["gateway_port"] = gateway_port
         self._repository.save_sandbox_state(
             agent_id,
-            sandbox_payload_json=self._sandbox_handle_payload(sandbox_handle),
+            sandbox_payload_json=sandbox_payload,
             adapter_base_url=adapter_endpoint.base_url,
             adapter_ready=True,
         )
@@ -900,22 +960,38 @@ class AgentManager:
     def _build_agent_start_payload_for_recovery(self, agent: AgentRecord) -> dict[str, Any]:
         """构建恢复时 /agent/start 请求的 payload"""
         if agent.model_id is None:
-            return {"model_id": None, "model": {}}
-        
-        model = self._repository.get_model(agent.model_id)
-        if model is not None:
-            model_info = {
-                "name": model.name,
-                "provider": model.provider,
-                "api_key": model.api_key,
-                "api_base_url": model.api_base_url,
-            }
-        else:
             model_info = {}
+        else:
+            model = self._repository.get_model(agent.model_id)
+            if model is not None:
+                model_info = {
+                    "name": model.name,
+                    "provider": model.provider,
+                    "api_key": model.api_key,
+                    "api_base_url": model.api_base_url,
+                }
+            else:
+                model_info = {}
+
+        profile_name = agent.id
+        sandbox_state = self._repository.get_sandbox_state(agent.id)
+        
+        # 从 sandbox_payload_json["metadata"] 中获取 gateway_port
+        gateway_port = None
+        if sandbox_state is not None:
+            metadata = sandbox_state.sandbox_payload_json.get("metadata", {})
+            port_val = metadata.get("gateway_port")
+            if isinstance(port_val, int):
+                gateway_port = port_val
+        
+        if gateway_port is None:
+            gateway_port = self._find_free_port()
 
         return {
             "model_id": agent.model_id,
             "model": model_info,
+            "profile": profile_name,
+            "gateway_port": gateway_port,
         }
 
     async def send_message(

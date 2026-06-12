@@ -156,9 +156,14 @@ def create_app(*, services: ServiceContainer | None = None) -> FastAPI:
                     success_count,
                     fail_count,
                 )
+                logger.info("Application startup complete")
             logger.info("Released recovery lock")
 
-        asyncio.create_task(_recover_agents())
+        # 使用 call_later 推迟到下一轮 event loop 迭代，
+        # 避免 recovery 任务在 uvicorn 输出 "Application startup complete" 之前运行。
+        asyncio.get_running_loop().call_later(
+            0, lambda: asyncio.create_task(_recover_agents())
+        )
 
     app.include_router(agents_router)
     app.include_router(cve_router)
