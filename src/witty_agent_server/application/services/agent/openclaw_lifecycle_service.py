@@ -140,28 +140,54 @@ class OpenClawOnboardError(OpenClawLifecycleError):
 
 
 class OpenClawLifecycleService:
-    def __init__(self, runner: CommandRunner | None = None) -> None:
+    def __init__(
+        self,
+        runner: CommandRunner | None = None,
+        *,
+        profile: str | None = None,
+        gateway_port: int | None = None,
+    ) -> None:
         self._runner: CommandRunner = runner or self._default_runner
+        self._profile = profile
+        self._gateway_port = gateway_port
+
+    def _build_base_command(self) -> list[str]:
+        cmd = ["openclaw"]
+        if self._profile:
+            cmd.extend(["--profile", self._profile])
+        return cmd
 
     def probe_running(self) -> bool:
+        if not self._profile:
+            return False
         result = self._invoke_gateway_command("status")
         if result.returncode != 0:
             return False
         return self._result_indicates_running(result)
 
     def stop(self) -> None:
+        if not self._profile:
+            return
         self._run_or_raise(action="stop")
 
     def start(self) -> None:
-        """已废弃：使用 onboard() 方法替代。"""
         raise NotImplementedError(
             "start() method is deprecated. Use onboard() instead."
         )
 
     def mcp_set(self, name: str, config: dict[str, object]) -> None:
-        """设置 MCP 配置。"""
+        if not self._profile:
+            raise OpenClawLifecycleError(
+                action="mcp set",
+                command=[],
+                returncode=-1,
+                stdout="",
+                stderr="profile is required",
+                message="profile is required for mcp set",
+            )
+
         config_str = json.dumps(config, ensure_ascii=False)
-        command = ["openclaw", "mcp", "set", name, config_str]
+        command = self._build_base_command() + ["mcp", "set", name, config_str]
         result = self._run_command(command)
         if result.returncode != 0:
             raise OpenClawMcpSetError(
@@ -172,8 +198,17 @@ class OpenClawLifecycleService:
             )
 
     def mcp_unset(self, name: str) -> None:
-        """卸载 MCP 配置。"""
-        command = ["openclaw", "mcp", "unset", name]
+        if not self._profile:
+            raise OpenClawLifecycleError(
+                action="mcp unset",
+                command=[],
+                returncode=-1,
+                stdout="",
+                stderr="profile is required",
+                message="profile is required for mcp unset",
+            )
+
+        command = self._build_base_command() + ["mcp", "unset", name]
         result = self._run_command(command)
         if result.returncode != 0:
             raise OpenClawMcpUnsetError(
@@ -193,25 +228,17 @@ class OpenClawLifecycleService:
         skip_search: bool = True,
         skip_hooks: bool = True,
     ) -> None:
-        """执行 openclaw onboard 命令来配置和启动 gateway。
-        
-        根据 temp/model 方案，不同模型提供商对应不同的 --auth-choice 参数：
-        
-        | 模型提供商 | --auth-choice 参数 |
-        | :--- | :--- |
-        | openai | openai-api-key |
-        | anthropic | anthropic-api-key |
-        | google | google-api-key |
-        | xai | xai-api-key |
-        | deepseek | deepseek-api-key |
-        | alibaba | qwen-api-key |
-        | zhipuai | zai-api-key |
-        | minimax | minimax-api-key |
-        | moonshotai | kimi-code-api-key |
-        | custom | custom-api-key |
-        """
-        command = [
-            "openclaw",
+        if not self._profile:
+            raise OpenClawLifecycleError(
+                action="onboard",
+                command=[],
+                returncode=-1,
+                stdout="",
+                stderr="profile is required",
+                message="profile is required for onboard",
+            )
+
+        command = self._build_base_command() + [
             "onboard",
             "--non-interactive",
             "--accept-risk",
@@ -220,6 +247,8 @@ class OpenClawLifecycleService:
             f"--{auth_choice}",
             api_key,
         ]
+        if self._gateway_port:
+            command.extend(["--gateway-port", str(self._gateway_port)])
         if install_daemon:
             command.append("--install-daemon")
         if skip_channels:
@@ -228,7 +257,7 @@ class OpenClawLifecycleService:
             command.append("--skip-search")
         if skip_hooks:
             command.append("--skip-hooks")
-        
+
         result = self._run_command(command)
         if result.returncode != 0:
             raise OpenClawOnboardError(
@@ -263,7 +292,7 @@ class OpenClawLifecycleService:
         self,
         action: str,
     ) -> CompletedProcess[str]:
-        command = ["openclaw", "gateway", action]
+        command = self._build_base_command() + ["gateway", action]
         return self._run_command(command)
 
     def _run_command(self, command: list[str]) -> CompletedProcess[str]:

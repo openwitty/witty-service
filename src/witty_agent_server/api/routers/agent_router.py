@@ -58,6 +58,8 @@ def create_agent_router(
                 "model": body.get("model"),
                 "mcp_server_name": body.get("mcp_server_name"),
                 "mcp_server_config": body.get("mcp_server_config"),
+                "profile": body.get("profile"),
+                "gateway_port": body.get("gateway_port"),
             }
             response = agent_service.start(
                 agent_id=id,
