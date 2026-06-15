@@ -194,6 +194,8 @@ class AgentRepository(Protocol):
         self, stale_threshold_seconds: int
     ) -> list[Any]: ...
 
+    def find_last_assistant_message_for_session(self, session_id: str) -> Any | None: ...
+
     def compact_message_delta_events(self, message_id: str) -> None: ...
 
     def delete_agent(self, agent_id: str) -> None: ...
@@ -1491,19 +1493,19 @@ class AgentManager:
             )
         finally:
             await adaptor_client.close()
-        generating_msg = self._repository.find_generating_message_for_session(session_id)
-        if generating_msg is not None:
+        last_msg = self._repository.find_last_assistant_message_for_session(session_id)
+        if last_msg is not None:
             try:
-                self._repository.update_message_status(generating_msg.id, MessageStatus.interrupted)
+                self._repository.update_message_status(last_msg.id, MessageStatus.interrupted)
                 self._logger.info(
-                    "update_message_status in ws: generating_msg.id=%s state=%s",
-                    generating_msg.id,
-                    MessageStatus.interrupted
+                    "update_message_status in abort: msg_id=%s state=%s",
+                    last_msg.id,
+                    MessageStatus.interrupted,
                 )
             except Exception:
                 self._logger.warning(
                     "Failed to mark message interrupted after abort: msg_id=%s",
-                    generating_msg.id, exc_info=True,
+                    last_msg.id, exc_info=True,
                 )
 
     async def delete_agent(self, agent_id: str) -> None:
