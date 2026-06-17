@@ -218,7 +218,21 @@ def _assemble_message(msg: MessageORM, events: list[MessageEventORM]) -> dict[st
             item["usage"] = usage
 
         event_items.append(item)
-        
+
+    msg_status = msg.status.value if isinstance(msg.status, MessageStatus) else msg.status
+    if msg_status in ("interrupted", "error"):
+        for tc in tool_calls:
+            if tc.get("status") == "running":
+                tc["status"] = "error"
+                if "error" not in tc:
+                    tc["error"] = "已停止生成" if msg_status == "interrupted" else "发生错误"
+        for item in event_items:
+            tc = item.get("toolCall")
+            if tc and tc.get("status") == "running":
+                tc["status"] = "error"
+                if "error" not in tc:
+                    tc["error"] = "已停止生成" if msg_status == "interrupted" else "发生错误"
+
     event_items.append({
         "type": "message.delta",
         "content": msg.content,
