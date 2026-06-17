@@ -188,12 +188,15 @@ class OpenClawAgentService(AgentServiceBase):
     ) -> None:
         """使用 onboard 命令启动 openclaw runtime。"""
         auth_choice = self.PROVIDER_TO_AUTH_CHOICE.get(model_provider, "deepseek-api-key")
-        
-        lifecycle_service = OpenClawLifecycleService(
+
+        self._lifecycle_service.update_config(
             profile=profile,
             gateway_port=gateway_port,
         )
-        
+        self._gateway_agent_client.update_config(
+            profile=profile,
+            gateway_port=gateway_port,
+        )
         logger.info(
             "Onboarding openclaw: provider=%s auth_choice=%s profile=%s gateway_port=%s",
             model_provider,
@@ -203,7 +206,7 @@ class OpenClawAgentService(AgentServiceBase):
         )
         
         try:
-            lifecycle_service.onboard(
+            self._lifecycle_service.onboard(
                 auth_choice=auth_choice,
                 api_key=api_key,
                 install_daemon=True,

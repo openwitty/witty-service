@@ -19,6 +19,12 @@ from witty_agent_server.application.services.session_ws_orchestrator import (
     SessionWSOrchestrator,
 )
 from witty_agent_server.application.services.task_pool import TaskPool
+from witty_agent_server.infra.ws.openclaw_gateway_client import (
+    OpenClawGatewayClient,
+)
+from witty_agent_server.application.services.agent.openclaw_lifecycle_service import (
+    OpenClawLifecycleService,
+)
 from witty_agent_server.logger.logging_config import configure_logging
 
 
@@ -41,8 +47,15 @@ def create_app(
     agent_service: AgentService | None = None,
 ) -> FastAPI:
     configure_logging()
-    resolved_agent_service = agent_service or AgentService()
-    resolved_session_service = session_service or build_default_session_service()
+    shared_gateway_client = OpenClawGatewayClient()
+    shared_lifecycle_service = OpenClawLifecycleService()
+    resolved_agent_service = agent_service or AgentService(
+        lifecycle_service=shared_lifecycle_service,
+        gateway_agent_client=shared_gateway_client,
+    )
+    resolved_session_service = session_service or build_default_session_service(
+        gateway_client=shared_gateway_client,
+    )
     session_state_sync_service = SessionStateSyncService()
     session_ws_orchestrator = SessionWSOrchestrator(
         session_service=resolved_session_service,
