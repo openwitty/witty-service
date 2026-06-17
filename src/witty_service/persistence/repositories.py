@@ -671,10 +671,10 @@ class SqliteRepository:
 
     def update_message_status(self, message_id: str, status: MessageStatus) -> None:
         with self._session_factory() as session:
-            session.query(MessageORM).filter(
-                MessageORM.id == message_id,
-                MessageORM.status == MessageStatus.generating,
-            ).update(
+            filters = [MessageORM.id == message_id]
+            if status == MessageStatus.completed:
+                filters.append(MessageORM.status == MessageStatus.generating)
+            session.query(MessageORM).filter(*filters).update(
                 {MessageORM.status: status},
                 synchronize_session=False,
             )
@@ -698,14 +698,15 @@ class SqliteRepository:
                 .all()
             )
 
-    def find_generating_message_for_session(self, session_id: str) -> MessageORM | None:
+    def find_last_assistant_message_for_session(self, session_id: str) -> MessageORM | None:
         with self._session_factory() as session:
             return (
                 session.query(MessageORM)
                 .filter(
                     MessageORM.session_id == session_id,
-                    MessageORM.status == MessageStatus.generating,
+                    MessageORM.role == "assistant",
                 )
+                .order_by(MessageORM.created_at.desc())
                 .first()
             )
 
