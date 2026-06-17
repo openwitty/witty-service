@@ -74,6 +74,18 @@ class OpenClawGatewayClient(ClientBase):
         self._idle_timeout = idle_timeout
         self._lifecycle_end_drain_timeout = lifecycle_end_drain_timeout
 
+    def update_config(
+        self,
+        *,
+        profile: str | None,
+        gateway_port: int | None,
+    ) -> None:
+        self._profile = profile
+        self._gateway_port = gateway_port
+        port = gateway_port or _DEFAULT_GATEWAY_PORT
+        self._url = f"ws://127.0.0.1:{port}"
+        self._token = None
+
     def _get_token(self) -> str | None:
         """获取 gateway token，延迟解析直到实际使用时。
         
@@ -828,7 +840,7 @@ class OpenClawGatewayClient(ClientBase):
         return None
 
     def _token_from_config(self) -> str | None:
-        config_path = Path.home() / ".openclaw" / "openclaw.json"
+        config_path = self._state_dir() / "openclaw.json"
         logger.debug(
             "_token_from_config config_path=%s exists=%s",
             config_path,

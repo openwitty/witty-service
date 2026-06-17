@@ -151,6 +151,15 @@ class OpenClawLifecycleService:
         self._profile = profile
         self._gateway_port = gateway_port
 
+    def update_config(
+        self,
+        *,
+        profile: str | None,
+        gateway_port: int | None,
+    ) -> None:
+        self._profile = profile
+        self._gateway_port = gateway_port
+
     def _build_base_command(self) -> list[str]:
         cmd = ["openclaw"]
         if self._profile:

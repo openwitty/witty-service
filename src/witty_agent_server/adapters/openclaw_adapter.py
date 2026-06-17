@@ -25,19 +25,19 @@ class OpenClawAdapter:
 
 def create_openclaw_runtime(
     *,
+    client: OpenClawGatewayClient | None = None,
     ws_url: str | None = None,
     gateway_token: str | None = None,
     profile: str | None = None,
     gateway_port: int | None = None,
 ) -> OpenClawGatewayRuntime:
-    return OpenClawGatewayRuntime(
-        client=OpenClawGatewayClient(
-            url=ws_url,
-            token=gateway_token,
-            profile=profile,
-            gateway_port=gateway_port,
-        )
+    resolved_client = client or OpenClawGatewayClient(
+        url=ws_url,
+        token=gateway_token,
+        profile=profile,
+        gateway_port=gateway_port,
     )
+    return OpenClawGatewayRuntime(client=resolved_client)
 
 
 def create_openclaw_adapter(

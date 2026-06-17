@@ -20,14 +20,20 @@ from witty_agent_server.application.services.session import (
     SessionServiceError,
 )
 from witty_agent_server.infra.persistence.in_memory import InMemorySessionRepository
+from witty_agent_server.infra.ws.openclaw_gateway_client import (
+    OpenClawGatewayClient,
+)
 
 
-def build_default_session_service() -> SessionService:
+def build_default_session_service(
+    *,
+    gateway_client: OpenClawGatewayClient | None = None,
+) -> SessionService:
     service = SessionService(
         runtime_registry=RuntimeRegistry(),
         repository=InMemorySessionRepository(),
     )
-    service.register_runtime(create_openclaw_runtime())
+    service.register_runtime(create_openclaw_runtime(client=gateway_client))
     return service
 
 
