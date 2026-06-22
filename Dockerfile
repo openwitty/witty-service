@@ -38,9 +38,13 @@ FROM python-deps AS final
 
 WORKDIR /app
 
-RUN mkdir -p ~/.witty/logs ~/.witty/db \
+RUN useradd -m -s /bin/bash witty \
+    && mkdir -p ~/.witty/logs ~/.witty/db \
+    && chown -R witty:witty /app ~/.witty \
     && find /usr/local/lib/python3.11 -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true \
     && find /usr/local/lib/python3.11 -type d -name tests -exec rm -rf {} + 2>/dev/null || true
+
+USER witty
 
 EXPOSE 8080
 

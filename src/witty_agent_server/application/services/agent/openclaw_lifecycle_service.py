@@ -217,7 +217,7 @@ class OpenClawLifecycleService:
         logger.info("Starting gateway in background: %s", command)
         self._gateway_process = subprocess.Popen(
             command,
-            stdout=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
             text=True,
         )
@@ -225,12 +225,12 @@ class OpenClawLifecycleService:
         deadline = time.time() + 30
         while time.time() < deadline:
             if self._gateway_process.poll() is not None:
-                stdout, stderr = self._gateway_process.communicate()
+                _, stderr = self._gateway_process.communicate()
                 raise OpenClawLifecycleError(
                     action="gateway run",
                     command=command,
                     returncode=self._gateway_process.returncode or -1,
-                    stdout=stdout or "",
+                    stdout="",
                     stderr=stderr or "",
                     message="gateway process exited prematurely",
                 )
@@ -253,15 +253,20 @@ class OpenClawLifecycleService:
             return
         try:
             self._gateway_process.terminate()
+            self._gateway_process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            pass
+        except Exception:
+            logger.exception("Failed to terminate gateway process")
+
+        if self._gateway_process.poll() is None:
             try:
-                self._gateway_process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
                 self._gateway_process.kill()
                 self._gateway_process.wait()
-        except Exception:
-            pass
-        finally:
-            self._gateway_process = None
+            except Exception:
+                logger.exception("Failed to kill gateway process, giving up")
+
+        self._gateway_process = None
 
     @staticmethod
     def _port_is_listening(port: int) -> bool:

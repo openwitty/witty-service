@@ -168,8 +168,16 @@ class DockerSandboxBackend(SandboxBackend):
         try:
             ports = container.attrs["NetworkSettings"]["Ports"]
             return int(ports[port_key][0]["HostPort"])
-        except (KeyError, IndexError, TypeError):
-            return 0
+        except (KeyError, IndexError, TypeError) as exc:
+            raise sandbox_start_failed(
+                sandbox_type=self.sandbox_type,
+                message="Failed to extract host port from container.",
+                details={
+                    "container_id": str(getattr(container, "id", "unknown")),
+                    "port_key": port_key,
+                    "error": str(exc),
+                },
+            ) from exc
 
     def stop(self, handle: SandboxHandle | str, **kwargs: Any) -> None:
         sandbox_handle = self._resolve_handle(handle)
