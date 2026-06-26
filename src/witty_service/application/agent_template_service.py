@@ -178,7 +178,7 @@ class AgentTemplateService:
         template_dir: Path,
     ) -> None:
         """逐个安装模板中定义的 skills。"""
-        openclaw_skills_dir = Path.home() / ".openclaw" / "skills"
+        openclaw_skills_dir = Path.home() / ".openclaw" / f"workspace-{agent.id}" / "skills"
         openclaw_skills_dir.mkdir(parents=True, exist_ok=True)
 
         repo = self._repository
