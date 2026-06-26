@@ -25,7 +25,7 @@ Witty Service 统一配置管理
     WITTY_DOCKER_CONTAINER_PORT    Docker容器端口 (默认: 8080)
     WITTY_DOCKER_CONTAINER_WORKSPACE_PATH  Docker容器内工作空间路径 (默认: /witty-workspace)
     WITTY_DOCKER_STOP_TIMEOUT      Docker容器停止超时时间(秒) (默认: 10)
-    WITTY_DOCKER_IMAGE             Docker镜像名称 (默认: witty-agent-server)
+    WITTY_DOCKER_IMAGE             Docker镜像名称 (默认: ghcr.io/openwitty/witty-agent-server)
     WITTY_DOCKER_IMAGE_TAG         Docker镜像标签 (默认: latest)
 
     # OpenClaw Gateway配置
@@ -130,7 +130,7 @@ class DockerSettings:
         WITTY_DOCKER_CONTAINER_PORT: 容器内部服务端口, 默认 8080
         WITTY_DOCKER_CONTAINER_WORKSPACE_PATH: 容器内工作空间挂载路径, 默认 /witty-workspace
         WITTY_DOCKER_STOP_TIMEOUT: 容器停止超时时间(秒), 默认 10
-        WITTY_DOCKER_IMAGE: Docker 镜像名称, 默认 witty-agent-server
+        WITTY_DOCKER_IMAGE: Docker 镜像名称, 默认 ghcr.io/openwitty/witty-agent-server
         WITTY_DOCKER_IMAGE_TAG: Docker 镜像标签, 默认 latest
 
         # 资源管控
