@@ -190,7 +190,10 @@ class DockerSandboxBackend(SandboxBackend):
         except NotFound:
             return None
 
-        _with_retry(lambda: container.reload())
+        try:
+            _with_retry(lambda: container.reload())
+        except (NotFound, APIError, ConnectionError):
+            return None
 
         if container.status == "running":
             return container
@@ -232,14 +235,14 @@ class DockerSandboxBackend(SandboxBackend):
 
     def _extract_host_port(self, container: Any) -> int:
         port_key = f"{self.container_port}/tcp"
-        ports = container.attrs["NetworkSettings"]["Ports"]
-        # containers.run() 后需 reload() 刷新端口绑定；已重连的容器跳过。
-        if port_key not in (ports or {}):
-            _with_retry(lambda: container.reload())
-            ports = container.attrs["NetworkSettings"]["Ports"]
         try:
+            ports = container.attrs["NetworkSettings"]["Ports"]
+            # containers.run() 后需 reload() 刷新端口绑定；已重连的容器跳过。
+            if port_key not in (ports or {}):
+                _with_retry(lambda: container.reload())
+                ports = container.attrs["NetworkSettings"]["Ports"]
             return int(ports[port_key][0]["HostPort"])
-        except (KeyError, IndexError, TypeError) as exc:
+        except (KeyError, IndexError, TypeError, NotFound, APIError, ConnectionError) as exc:
             raise sandbox_start_failed(
                 sandbox_type=self.sandbox_type,
                 message="Failed to extract host port from container.",
