@@ -6,6 +6,9 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from docker.errors import APIError, NotFound
+from requests.exceptions import ConnectionError
+
 from witty_service.sandbox.base import (
     AdapterEndpoint,
     SandboxBackend,
@@ -15,14 +18,43 @@ from witty_service.sandbox.base import (
     sandbox_start_failed,
     sandbox_stop_failed,
 )
-from witty_service.sandbox.local_process import find_free_port
-
 logger = logging.getLogger(__name__)
 
 DEFAULT_DOCKER_IMAGE = "ghcr.io/openwitty/witty-agent-server:latest"
 DEFAULT_CONTAINER_PORT = 8080
 # 默认契约必须保持为 /witty-workspace，除非显式配置 container_workspace_path。
 DEFAULT_CONTAINER_WORKSPACE_PATH = "/witty-workspace"
+
+
+def _with_retry(operation, *, max_retries: int = 3, base_delay: float = 0.5):
+    """
+    在遇到可恢复的 Docker 错误时，以指数退避策略调用 operation。
+    该方法处理以下异常：
+        NotFound — 立即重新抛出（缺失的容器无法通过等待修复）
+        APIError（NotFound 除外）— 以指数退避策略重试
+        ConnectionError — 以指数退避策略重试（守护进程重启、socket 超时等情况）
+    """
+    import time as _time
+
+    last_error: Exception | None = None
+    for attempt in range(max_retries):
+        try:
+            return operation()
+        except NotFound:
+            raise
+        except (APIError, ConnectionError) as exc:
+            last_error = exc
+            if attempt < max_retries - 1:
+                delay = base_delay * (2**attempt)
+                logger.warning(
+                    "Docker API error (attempt %d/%d), retrying in %.1fs: %s",
+                    attempt + 1,
+                    max_retries,
+                    delay,
+                    exc,
+                )
+                _time.sleep(delay)
+    raise last_error  # type: ignore[misc]
 
 
 class DockerSandboxBackend(SandboxBackend):
@@ -97,7 +129,6 @@ class DockerSandboxBackend(SandboxBackend):
             self._handles[handle.sandbox_id] = handle
             return handle
 
-        host_port = int(kwargs.get("port", find_free_port()))
         environment = dict(kwargs.get("environment", {}))
 
         try:
@@ -106,7 +137,7 @@ class DockerSandboxBackend(SandboxBackend):
                 name=container_name,
                 detach=True,
                 user="witty",
-                ports={f"{self.container_port}/tcp": host_port},
+                ports={f"{self.container_port}/tcp": None},
                 volumes={
                     resolved_workspace_path: {
                         "bind": self.container_workspace_path,
@@ -137,13 +168,12 @@ class DockerSandboxBackend(SandboxBackend):
                     "image": self.image,
                     "path": workspace_path,
                     "container_workspace_path": self.container_workspace_path,
-                    "host_port": host_port,
                     "stderr": str(exc),
                 },
             ) from exc
 
         return self._build_handle_from_container(
-            container, agent_id, resolved_workspace_path, host_port=host_port
+            container, agent_id, resolved_workspace_path
         )
 
     def _find_handle_by_agent_id(self, agent_id: str) -> SandboxHandle | None:
@@ -154,17 +184,25 @@ class DockerSandboxBackend(SandboxBackend):
 
     def _try_find_container(self, container_name: str) -> Any | None:
         try:
-            container = self._get_client().containers.get(container_name)
-            container.reload()
-            if container.status == "running":
-                return container
-            try:
-                container.remove(force=True)
-            except Exception:
-                pass
+            container = _with_retry(
+                lambda: self._get_client().containers.get(container_name)
+            )
+        except NotFound:
             return None
-        except Exception:
+
+        try:
+            _with_retry(lambda: container.reload())
+        except (NotFound, APIError, ConnectionError):
             return None
+
+        if container.status == "running":
+            return container
+
+        try:
+            container.remove(force=True)
+        except (NotFound, APIError):
+            pass
+        return None
 
     def _build_handle_from_container(
         self,
@@ -199,25 +237,36 @@ class DockerSandboxBackend(SandboxBackend):
         port_key = f"{self.container_port}/tcp"
         try:
             ports = container.attrs["NetworkSettings"]["Ports"]
+            # containers.run() 后需 reload() 刷新端口绑定；已重连的容器跳过。
+            if port_key not in (ports or {}):
+                _with_retry(lambda: container.reload())
+                ports = container.attrs["NetworkSettings"]["Ports"]
             return int(ports[port_key][0]["HostPort"])
-        except (KeyError, IndexError, TypeError) as exc:
+        except (KeyError, IndexError, TypeError, NotFound, APIError, ConnectionError) as exc:
             raise sandbox_start_failed(
                 sandbox_type=self.sandbox_type,
                 message="Failed to extract host port from container.",
                 details={
-                    "container_id": str(getattr(container, "id", "unknown")),
+                    "container_id": self._container_id(container) or "unknown",
                     "port_key": port_key,
                     "error": str(exc),
                 },
             ) from exc
 
     def stop(self, handle: SandboxHandle | str, **kwargs: Any) -> None:
+
         sandbox_handle = self._resolve_handle(handle)
         container = self._containers.get(sandbox_handle.sandbox_id)
         if container is None:
             return
         try:
-            container.stop(timeout=int(kwargs.get("timeout", self.stop_timeout)))
+            _with_retry(
+                lambda: container.stop(
+                    timeout=int(kwargs.get("timeout", self.stop_timeout))
+                )
+            )
+        except NotFound:
+            return
         except Exception as exc:
             raise self._sandbox_operation_failed(
                 operation="stop",
@@ -227,13 +276,16 @@ class DockerSandboxBackend(SandboxBackend):
             ) from exc
 
     def status(self, handle: SandboxHandle | str, **kwargs: Any) -> SandboxStatus:
+
         sandbox_handle = self._resolve_handle(handle)
         container = self._containers.get(sandbox_handle.sandbox_id)
         if container is None:
             return SandboxStatus.stopped
 
         try:
-            container.reload()
+            _with_retry(lambda: container.reload())
+        except NotFound:
+            return SandboxStatus.stopped
         except Exception as exc:
             raise self._sandbox_operation_failed(
                 operation="status",
@@ -261,17 +313,30 @@ class DockerSandboxBackend(SandboxBackend):
         return AdapterEndpoint(base_url=base_url, health_url=f"{base_url}/ping")
 
     def cleanup(self, handle: SandboxHandle | str, **kwargs: Any) -> None:
+
         sandbox_handle = self._resolve_handle(handle)
         container = self._containers.get(sandbox_handle.sandbox_id)
         stop_error: Exception | None = None
         remove_error: Exception | None = None
         if container is not None:
             try:
-                container.stop(timeout=int(kwargs.get("timeout", self.stop_timeout)))
+                _with_retry(
+                    lambda: container.stop(
+                        timeout=int(kwargs.get("timeout", self.stop_timeout))
+                    )
+                )
+            except NotFound:
+                pass
             except Exception as exc:
                 stop_error = exc
             try:
-                container.remove(force=bool(kwargs.get("force", False)))
+                _with_retry(
+                    lambda: container.remove(
+                        force=bool(kwargs.get("force", False))
+                    )
+                )
+            except NotFound:
+                pass
             except Exception as exc:
                 remove_error = exc
         self._containers.pop(sandbox_handle.sandbox_id, None)
@@ -281,7 +346,7 @@ class DockerSandboxBackend(SandboxBackend):
                 operation="cleanup",
                 sandbox_handle=sandbox_handle,
                 container=container,
-                error=remove_error or stop_error or RuntimeError("cleanup failed"),
+                error=remove_error or stop_error,
                 extra_details={
                     "stop_error": str(stop_error) if stop_error else None,
                     "remove_error": str(remove_error) if remove_error else None,

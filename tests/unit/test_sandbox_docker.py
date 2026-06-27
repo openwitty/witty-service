@@ -63,7 +63,8 @@ class FakeContainers:
     def get(self, container_name: str) -> FakeContainer:
         if container_name in self._get_containers:
             return self._get_containers[container_name]
-        raise RuntimeError(f"container {container_name} not found")
+        from docker.errors import NotFound
+        raise NotFound(f"container {container_name} not found")
 
 
 class FakeDockerClient:
@@ -91,7 +92,8 @@ class ReloadErrorContainer(FakeContainer):
 
 class GetErrorContainers(FakeContainers):
     def get(self, container_name: str) -> FakeContainer:
-        raise RuntimeError("docker daemon error")
+        from docker.errors import APIError
+        raise APIError("docker daemon error")
 
 
 def _workspace_dir(tmp_path: Path) -> str:
@@ -127,7 +129,7 @@ def test_docker_runtime_start_mounts_workspace_to_witty_workspace(
             "name": "witty-sandbox-agent-1",
             "detach": True,
             "user": "witty",
-            "ports": {"8080/tcp": 18080},
+            "ports": {"8080/tcp": None},
             "volumes": {
                 workspace_path: {
                     "bind": "/witty-workspace",
@@ -193,15 +195,14 @@ def test_docker_runtime_stop_cleanup_and_endpoint(tmp_path: Path) -> None:
     handle = backend.start(
         agent_id="agent-2",
         workspace_path=workspace_path,
-        port=18081,
     )
 
     endpoint = backend.endpoint(handle)
     backend.stop(handle)
     backend.cleanup(handle)
 
-    assert endpoint.base_url == "http://127.0.0.1:18081"
-    assert endpoint.health_url == "http://127.0.0.1:18081/ping"
+    assert endpoint.base_url == "http://127.0.0.1:18080"
+    assert endpoint.health_url == "http://127.0.0.1:18080/ping"
     assert container.stop_called is True
     assert container.remove_called is True
     assert handle.sandbox_id not in backend._handles
@@ -532,9 +533,10 @@ def test_docker_runtime_start_ignores_non_running_existing_container(
     assert client.containers.run_calls[0]["name"] == "witty-sandbox-agent-stopped"
 
 
-def test_docker_runtime_start_handles_container_get_error_gracefully(
+def test_docker_runtime_start_propagates_container_get_error(
     tmp_path: Path,
 ) -> None:
+    from docker.errors import APIError
     from witty_service.sandbox.docker import DockerSandboxBackend
 
     container = FakeContainer()
@@ -544,14 +546,11 @@ def test_docker_runtime_start_handles_container_get_error_gracefully(
     backend = DockerSandboxBackend(client=client, image="witty-agent:test")
     workspace_path = _workspace_dir(tmp_path)
 
-    handle = backend.start(
-        agent_id="agent-get-error",
-        workspace_path=workspace_path,
-        port=18114,
-    )
-
-    assert "reconnected" not in handle.metadata
-    assert handle.metadata["container_id"] == "container-123"
+    with pytest.raises(APIError, match="docker daemon error"):
+        backend.start(
+            agent_id="agent-get-error",
+            workspace_path=workspace_path,
+        )
 
 
 # =============================================================================
@@ -617,7 +616,8 @@ def test_docker_runtime_try_find_container_removes_non_running() -> None:
     assert container.remove_called is True
 
 
-def test_docker_runtime_try_find_container_returns_none_on_error() -> None:
+def test_docker_runtime_try_find_container_raises_on_api_error() -> None:
+    from docker.errors import APIError
     from witty_service.sandbox.docker import DockerSandboxBackend
 
     container = FakeContainer()
@@ -626,9 +626,8 @@ def test_docker_runtime_try_find_container_returns_none_on_error() -> None:
 
     backend = DockerSandboxBackend(client=client)
 
-    result = backend._try_find_container("witty-sandbox-nonexistent")
-
-    assert result is None
+    with pytest.raises(APIError, match="docker daemon error"):
+        backend._try_find_container("witty-sandbox-nonexistent")
 
 
 # =============================================================================
@@ -645,17 +644,16 @@ def test_docker_runtime_endpoint_ws_url(tmp_path: Path) -> None:
     handle = backend.start(
         agent_id="agent-ws",
         workspace_path=workspace_path,
-        port=18140,
     )
 
     endpoint = backend.endpoint(handle)
 
-    assert endpoint.ws_url == "ws://127.0.0.1:18140/agent/sessions/{session_id}/ws"
+    assert endpoint.ws_url == "ws://127.0.0.1:18080/agent/sessions/{session_id}/ws"
     assert (
         endpoint.ws_endpoint("session-abc")
-        == "ws://127.0.0.1:18140/agent/sessions/session-abc/ws"
+        == "ws://127.0.0.1:18080/agent/sessions/session-abc/ws"
     )
-    assert endpoint.health_url == "http://127.0.0.1:18140/ping"
+    assert endpoint.health_url == "http://127.0.0.1:18080/ping"
 
 
 # =============================================================================
