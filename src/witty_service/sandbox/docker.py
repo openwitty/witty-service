@@ -19,7 +19,7 @@ from witty_service.sandbox.local_process import find_free_port
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_DOCKER_IMAGE = "witty-agent-server:latest"
+DEFAULT_DOCKER_IMAGE = "ghcr.io/openwitty/witty-agent-server:latest"
 DEFAULT_CONTAINER_PORT = 8080
 # 默认契约必须保持为 /witty-workspace，除非显式配置 container_workspace_path。
 DEFAULT_CONTAINER_WORKSPACE_PATH = "/witty-workspace"

@@ -25,7 +25,7 @@ Witty Service 统一配置管理
     WITTY_DOCKER_CONTAINER_PORT    Docker容器端口 (默认: 8080)
     WITTY_DOCKER_CONTAINER_WORKSPACE_PATH  Docker容器内工作空间路径 (默认: /witty-workspace)
     WITTY_DOCKER_STOP_TIMEOUT      Docker容器停止超时时间(秒) (默认: 10)
-    WITTY_DOCKER_IMAGE             Docker镜像名称 (默认: witty-agent-server)
+    WITTY_DOCKER_IMAGE             Docker镜像名称 (默认: ghcr.io/openwitty/witty-agent-server)
     WITTY_DOCKER_IMAGE_TAG         Docker镜像标签 (默认: latest)
 
     # OpenClaw Gateway配置
@@ -130,7 +130,7 @@ class DockerSettings:
         WITTY_DOCKER_CONTAINER_PORT: 容器内部服务端口, 默认 8080
         WITTY_DOCKER_CONTAINER_WORKSPACE_PATH: 容器内工作空间挂载路径, 默认 /witty-workspace
         WITTY_DOCKER_STOP_TIMEOUT: 容器停止超时时间(秒), 默认 10
-        WITTY_DOCKER_IMAGE: Docker 镜像名称, 默认 witty-agent-server
+        WITTY_DOCKER_IMAGE: Docker 镜像名称, 默认 ghcr.io/openwitty/witty-agent-server
         WITTY_DOCKER_IMAGE_TAG: Docker 镜像标签, 默认 latest
 
         # 资源管控
@@ -146,7 +146,7 @@ class DockerSettings:
     container_port: int = 8080
     container_workspace_path: str = "/witty-workspace"
     stop_timeout: int = 10
-    image: str = "witty-agent-server"
+    image: str = "ghcr.io/openwitty/witty-agent-server"
     image_tag: str = "latest"
     memory_limit: str = "512m"
     pids_limit: int = 100
@@ -163,7 +163,7 @@ class DockerSettings:
             container_port=int(os.getenv("WITTY_DOCKER_CONTAINER_PORT", 8080)),
             container_workspace_path=os.getenv("WITTY_DOCKER_CONTAINER_WORKSPACE_PATH", "/witty-workspace"),
             stop_timeout=int(os.getenv("WITTY_DOCKER_STOP_TIMEOUT", 10)),
-            image=os.getenv("WITTY_DOCKER_IMAGE", "witty-agent-server"),
+            image=os.getenv("WITTY_DOCKER_IMAGE", "ghcr.io/openwitty/witty-agent-server"),
             image_tag=os.getenv("WITTY_DOCKER_IMAGE_TAG", "latest"),
             memory_limit=os.getenv("WITTY_DOCKER_MEMORY_LIMIT", "512m"),
             pids_limit=int(os.getenv("WITTY_DOCKER_PIDS_LIMIT", "100")),
