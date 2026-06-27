@@ -38,12 +38,10 @@ class OpenClawAgentService(AgentServiceBase):
     PROVIDER_TO_AUTH_CHOICE: dict[str, str] = {
         "openai": "openai-api-key",
         "anthropic": "anthropic-api-key",
-        "google": "google-api-key",
+        "google": "gemini-api-key",
         "xai": "xai-api-key",
         "deepseek": "deepseek-api-key",
-        "alibaba": "qwen-api-key",
         "zhipuai": "zai-api-key",
-        "minimax": "minimax-api-key",
         "moonshotai": "kimi-code-api-key",
         "custom": "custom-api-key",
     }
@@ -116,12 +114,18 @@ class OpenClawAgentService(AgentServiceBase):
 
             model_provider = config.get("model", {}).get("provider", "") if config else ""
             api_key = config.get("model", {}).get("api_key", "") if config else ""
+            custom_base_url = config.get("model", {}).get("api_base_url") if config else None
+            custom_model_id = config.get("model", {}).get("name") if config else None
+            custom_compatibility = config.get("model", {}).get("compatibility") if config else None
 
             self._onboard_openclaw(
                 model_provider=model_provider,
                 api_key=api_key,
                 profile=profile,
                 gateway_port=gateway_port,
+                custom_base_url=custom_base_url,
+                custom_model_id=custom_model_id,
+                custom_compatibility=custom_compatibility,
             )
 
             resolved_agent_id, configured_agent = self._resolve_target_agent(
@@ -189,6 +193,9 @@ class OpenClawAgentService(AgentServiceBase):
         api_key: str,
         profile: str | None,
         gateway_port: int | None,
+        custom_base_url: str | None = None,
+        custom_model_id: str | None = None,
+        custom_compatibility: str | None = None,
     ) -> None:
         """使用 onboard 命令启动 openclaw runtime。"""
         auth_choice = self.PROVIDER_TO_AUTH_CHOICE.get(model_provider, "deepseek-api-key")
@@ -202,11 +209,14 @@ class OpenClawAgentService(AgentServiceBase):
             gateway_port=gateway_port,
         )
         logger.info(
-            "Onboarding openclaw: provider=%s auth_choice=%s profile=%s gateway_port=%s",
+            "Onboarding openclaw: provider=%s auth_choice=%s profile=%s gateway_port=%s custom_base_url=%s custom_model_id=%s custom_compatibility=%s",
             model_provider,
             auth_choice,
             profile,
             gateway_port,
+            custom_base_url,
+            custom_model_id,
+            custom_compatibility,
         )
         
         try:
@@ -218,6 +228,9 @@ class OpenClawAgentService(AgentServiceBase):
                 skip_search=True,
                 skip_hooks=True,
                 skip_health=True,
+                custom_base_url=custom_base_url,
+                custom_model_id=custom_model_id,
+                custom_compatibility=custom_compatibility,
             )
         except OpenClawLifecycleError as exc:
             raise AgentServiceError(

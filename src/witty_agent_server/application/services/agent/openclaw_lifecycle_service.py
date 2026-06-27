@@ -147,6 +147,12 @@ class OpenClawOnboardError(OpenClawLifecycleError):
 
 
 class OpenClawLifecycleService:
+    # 映射 auth_choice -> 实际 API key 的 flag 名（当 flag 名与 auth_choice 不一致时）
+    AUTH_CHOICE_TO_KEY_FLAG: dict[str, str] = {
+        "qwen-api-key": "--modelstudio-api-key",
+        "minimax-cn-api": "--minimax-api-key",
+    }
+
     def __init__(
         self,
         runner: CommandRunner | None = None,
@@ -349,6 +355,9 @@ class OpenClawLifecycleService:
         skip_search: bool = True,
         skip_hooks: bool = True,
         skip_health: bool = False,
+        custom_base_url: str | None = None,
+        custom_model_id: str | None = None,
+        custom_compatibility: str | None = None,
     ) -> None:
         if not self._profile:
             raise OpenClawLifecycleError(
@@ -360,13 +369,14 @@ class OpenClawLifecycleService:
                 message="profile is required for onboard",
             )
 
+        key_flag = self.AUTH_CHOICE_TO_KEY_FLAG.get(auth_choice, f"--{auth_choice}")
         command = self._build_base_command() + [
             "onboard",
             "--non-interactive",
             "--accept-risk",
             "--auth-choice",
             auth_choice,
-            f"--{auth_choice}",
+            key_flag,
             api_key,
         ]
         if self._gateway_port:
@@ -381,6 +391,15 @@ class OpenClawLifecycleService:
             command.append("--skip-hooks")
         if skip_health:
             command.append("--skip-health")
+        
+        # 当使用 custom-api-key 认证时，添加自定义参数
+        if auth_choice == "custom-api-key":
+            if custom_base_url:
+                command.extend(["--custom-base-url", custom_base_url])
+            if custom_model_id:
+                command.extend(["--custom-model-id", custom_model_id])
+            if custom_compatibility:
+                command.extend(["--custom-compatibility", custom_compatibility])
 
         result = self._run_command(command)
         if result.returncode != 0:

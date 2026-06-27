@@ -52,6 +52,7 @@ class ModelRecord:
     provider: str
     api_key: str
     api_base_url: str | None
+    compatibility: str | None
     enabled: bool
     max_tokens: int
     temperature: float
@@ -1001,6 +1002,7 @@ class SqliteRepository:
         provider: str,
         api_key: str,
         api_base_url: str | None = None,
+        compatibility: str | None = None,
         enabled: bool = True,
         max_tokens: int = 4096,
         temperature: float = 0.7,
@@ -1012,6 +1014,7 @@ class SqliteRepository:
             provider=provider,
             api_key=api_key,
             api_base_url=api_base_url,
+            compatibility=compatibility,
             enabled=enabled,
             max_tokens=max_tokens,
             temperature=temperature,
@@ -1026,6 +1029,7 @@ class SqliteRepository:
         provider: str,
         api_key: str,
         api_base_url: str | None = None,
+        compatibility: str | None = None,
         enabled: bool = True,
         max_tokens: int = 4096,
         temperature: float = 0.7,
@@ -1038,6 +1042,7 @@ class SqliteRepository:
                 provider=provider,
                 api_key=api_key,
                 api_base_url=api_base_url,
+                compatibility=compatibility,
                 enabled=enabled,
                 max_tokens=max_tokens,
                 temperature=temperature,
@@ -1076,6 +1081,7 @@ class SqliteRepository:
         provider: str | None = None,
         api_key: str | None = None,
         api_base_url: str | None = None,
+        compatibility: str | None = None,
         enabled: bool | None = None,
         max_tokens: int | None = None,
         temperature: float | None = None,
@@ -1093,6 +1099,8 @@ class SqliteRepository:
                 row.api_key = api_key
             if api_base_url is not None:
                 row.api_base_url = api_base_url
+            if compatibility is not None:
+                row.compatibility = compatibility
             if enabled is not None:
                 row.enabled = enabled
             if max_tokens is not None:
@@ -1114,6 +1122,7 @@ class SqliteRepository:
             provider=row.provider,
             api_key=row.api_key,
             api_base_url=row.api_base_url,
+            compatibility=row.compatibility,
             enabled=row.enabled,
             max_tokens=row.max_tokens,
             temperature=row.temperature,
