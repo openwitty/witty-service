@@ -105,6 +105,12 @@ class SandboxStateRecord:
 
 
 @dataclass(slots=True)
+class AgentWithRuntimeStateRecord:
+    agent: AgentRecord
+    runtime_state: SandboxStateRecord | None
+
+
+@dataclass(slots=True)
 class SkillRepositoryRecord:
     repo_id: str
     repo_name: str
@@ -483,6 +489,24 @@ class SqliteRepository:
                 return None
             return self._to_session_record(row)
 
+    def find_session_by_runtime_identity(
+        self,
+        runtime_type: str,
+        runtime_session_id: str,
+    ) -> SessionRecord | None:
+        with self._session_factory() as session:
+            row = (
+                session.query(SessionORM)
+                .filter(
+                    SessionORM.runtime_type == runtime_type,
+                    SessionORM.runtime_session_id == runtime_session_id,
+                )
+                .first()
+            )
+            if row is None:
+                return None
+            return self._to_session_record(row)
+
     def list_sessions(self, agent_id: str) -> list[SessionRecord]:
         with self._session_factory() as session:
             rows = (
@@ -492,6 +516,35 @@ class SqliteRepository:
                 .all()
             )
             return [self._to_session_record(row) for row in rows]
+
+    def list_sessions_by_runtime_session_ids(
+        self,
+        runtime_type: str,
+        runtime_session_ids: list[str],
+    ) -> list[SessionRecord]:
+        ordered_ids = self._dedupe_preserve_order(runtime_session_ids)
+        if not ordered_ids:
+            return []
+
+        with self._session_factory() as session:
+            rows = (
+                session.query(SessionORM)
+                .filter(
+                    SessionORM.runtime_type == runtime_type,
+                    SessionORM.runtime_session_id.in_(ordered_ids),
+                )
+                .all()
+            )
+            by_runtime_session_id = {
+                row.runtime_session_id: self._to_session_record(row)
+                for row in rows
+                if row.runtime_session_id is not None
+            }
+            return [
+                by_runtime_session_id[runtime_session_id]
+                for runtime_session_id in ordered_ids
+                if runtime_session_id in by_runtime_session_id
+            ]
 
     def upsert_session(
         self,
@@ -593,6 +646,69 @@ class SqliteRepository:
             if row is None:
                 return None
             return self._to_sandbox_state_record(row)
+
+    def list_runtime_session_ids_by_agent_id(
+        self,
+        agent_id: str,
+        runtime_type: str = "openclaw",
+    ) -> list[str]:
+        with self._session_factory() as session:
+            rows = (
+                session.query(SessionORM.runtime_session_id)
+                .filter(
+                    SessionORM.agent_id == agent_id,
+                    SessionORM.runtime_type == runtime_type,
+                    SessionORM.runtime_session_id.isnot(None),
+                )
+                .order_by(SessionORM.created_at.asc())
+                .all()
+            )
+            return [runtime_session_id for (runtime_session_id,) in rows]
+
+    def list_agents_with_runtime_state(self) -> list[AgentWithRuntimeStateRecord]:
+        with self._session_factory() as session:
+            rows = (
+                session.query(AgentORM, AgentRuntimeStateORM)
+                .outerjoin(AgentRuntimeStateORM, AgentRuntimeStateORM.agent_id == AgentORM.id)
+                .filter(AgentORM.status != AgentStatus.deleted.value)
+                .order_by(AgentORM.created_at.asc())
+                .all()
+            )
+            return [
+                AgentWithRuntimeStateRecord(
+                    agent=self._to_agent_record(agent_row),
+                    runtime_state=(
+                        self._to_sandbox_state_record(runtime_state_row)
+                        if runtime_state_row is not None
+                        else None
+                    ),
+                )
+                for agent_row, runtime_state_row in rows
+            ]
+
+    def list_agent_records_by_ids(self, agent_ids: list[str]) -> list[AgentRecord]:
+        ordered_ids = self._dedupe_preserve_order(agent_ids)
+        if not ordered_ids:
+            return []
+
+        with self._session_factory() as session:
+            rows = (
+                session.query(AgentORM)
+                .filter(
+                    AgentORM.id.in_(ordered_ids),
+                    AgentORM.status != AgentStatus.deleted.value,
+                )
+                .all()
+            )
+            by_agent_id = {
+                row.id: self._to_agent_record(row)
+                for row in rows
+            }
+            return [
+                by_agent_id[agent_id]
+                for agent_id in ordered_ids
+                if agent_id in by_agent_id
+            ]
 
     def create_message(
         self,
@@ -815,6 +931,17 @@ class SqliteRepository:
             "uq_message_events_session_seq" in message
             or "message_events.session_id, message_events.seq_no" in message
         )
+
+    @staticmethod
+    def _dedupe_preserve_order(values: list[str]) -> list[str]:
+        seen: set[str] = set()
+        result: list[str] = []
+        for value in values:
+            if value in seen:
+                continue
+            seen.add(value)
+            result.append(value)
+        return result
 
     def get_message_count(self, session_id: str) -> int:
         with self._session_factory() as session:

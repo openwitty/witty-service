@@ -7,6 +7,7 @@ import pytest
 
 from witty_service.api import services as services_module
 from witty_service.api.services import ServiceContainer
+from witty_service.adapter.insight_client import InsightClient
 from witty_service.domain.errors import DomainError
 
 
@@ -73,6 +74,26 @@ def test_get_agent_manager_for_agent_uses_agent_sandbox(monkeypatch) -> None:
     assert manager._sandbox_backend is backend
 
 
+def test_get_insight_client_returns_injected_client() -> None:
+    insight_client = MagicMock(spec=InsightClient)
+    container = ServiceContainer(
+        repository=MagicMock(),
+        workspace_store=MagicMock(),
+        insight_client=insight_client,
+    )
+
+    assert container.get_insight_client() is insight_client
+
+
+def test_get_insight_client_requires_enabled_insight() -> None:
+    container = ServiceContainer(repository=MagicMock(), workspace_store=MagicMock())
+
+    with pytest.raises(DomainError) as exc_info:
+        container.get_insight_client()
+
+    assert exc_info.value.code == "INSIGHT_DISABLED"
+
+
 def test_ensure_dir_exists_creates_sqlite_parent(tmp_path) -> None:
     db_path = tmp_path / "nested" / "witty.db"
 
@@ -80,3 +101,15 @@ def test_ensure_dir_exists_creates_sqlite_parent(tmp_path) -> None:
     services_module._ensure_dir_exists("postgresql://example")
 
     assert db_path.parent.exists()
+
+
+def test_build_default_services_creates_insight_client_when_enabled(monkeypatch) -> None:
+    monkeypatch.setenv("WITTY_INSIGHT_ENABLED", "true")
+    monkeypatch.setenv("WITTY_INSIGHT_BASE_URL", "http://127.0.0.1:7396")
+    monkeypatch.setattr(services_module, "create_sqlite_engine", lambda *_args, **_kwargs: MagicMock())
+    monkeypatch.setattr(services_module, "init_db", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(services_module, "create_session_factory", lambda *_args, **_kwargs: MagicMock())
+
+    container = services_module.build_default_services()
+
+    assert isinstance(container.insight_client, InsightClient)

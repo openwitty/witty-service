@@ -6,6 +6,13 @@ from typing import Any
 from witty_service.domain.models import ErrorPayload
 
 
+INSIGHT_DISABLED = "INSIGHT_DISABLED"
+INSIGHT_UNAVAILABLE = "INSIGHT_UNAVAILABLE"
+INSIGHT_TIMEOUT = "INSIGHT_TIMEOUT"
+INSIGHT_UPSTREAM_ERROR = "INSIGHT_UPSTREAM_ERROR"
+INSIGHT_BAD_RESPONSE = "INSIGHT_BAD_RESPONSE"
+
+
 class DomainError(Exception):
     def __init__(
         self,
@@ -104,3 +111,62 @@ class OpenClawAgentNotFoundError(AgentServiceError):
             status_code=500,
             details={"agent_id": agent_id},
         )
+
+
+def insight_disabled() -> DomainError:
+    return DomainError(
+        code=INSIGHT_DISABLED,
+        message="witty insight integration is disabled",
+        status_code=503,
+    )
+
+
+def insight_unavailable(*, base_url: str, path: str, reason: str) -> DomainError:
+    return DomainError(
+        code=INSIGHT_UNAVAILABLE,
+        message="witty insight is unavailable",
+        status_code=503,
+        details={"base_url": base_url, "path": path, "reason": reason},
+    )
+
+
+def insight_timeout(*, base_url: str, path: str, timeout_seconds: float) -> DomainError:
+    return DomainError(
+        code=INSIGHT_TIMEOUT,
+        message="witty insight request timed out",
+        status_code=504,
+        details={
+            "base_url": base_url,
+            "path": path,
+            "timeout_seconds": timeout_seconds,
+        },
+    )
+
+
+def insight_upstream_error(
+    *,
+    base_url: str,
+    path: str,
+    status_code: int,
+    response_text: str,
+) -> DomainError:
+    return DomainError(
+        code=INSIGHT_UPSTREAM_ERROR,
+        message="witty insight upstream request failed",
+        status_code=502,
+        details={
+            "base_url": base_url,
+            "path": path,
+            "status_code": status_code,
+            "response_text": response_text,
+        },
+    )
+
+
+def insight_bad_response(*, base_url: str, path: str, reason: str) -> DomainError:
+    return DomainError(
+        code=INSIGHT_BAD_RESPONSE,
+        message="witty insight returned an invalid response",
+        status_code=502,
+        details={"base_url": base_url, "path": path, "reason": reason},
+    )
