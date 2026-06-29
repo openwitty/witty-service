@@ -26,6 +26,7 @@ class ServiceContainer:
     ws_client_pool: WebSocketClientPool = field(default_factory=WebSocketClientPool)
     insight_client: InsightClient | None = None
     session_manager: SessionManager = field(init=False)
+    insight_facade: Any = field(init=False, default=None)
 
     def __post_init__(self) -> None:
         self.session_manager = SessionManager(repository=self.repository)
@@ -61,6 +62,13 @@ class ServiceContainer:
         if self.insight_client is None:
             raise insight_disabled()
         return self.insight_client
+
+    def get_insight_facade(self) -> Any:
+        if self.insight_facade is None:
+            from witty_service.application.insight_facade import InsightFacade
+
+            self.insight_facade = InsightFacade(self)
+        return self.insight_facade
 
 
 def _ensure_dir_exists(database_url: str) -> None:

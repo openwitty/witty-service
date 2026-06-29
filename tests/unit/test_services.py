@@ -94,6 +94,15 @@ def test_get_insight_client_requires_enabled_insight() -> None:
     assert exc_info.value.code == "INSIGHT_DISABLED"
 
 
+def test_get_insight_facade_reuses_single_instance() -> None:
+    container = ServiceContainer(repository=MagicMock(), workspace_store=MagicMock())
+
+    first = container.get_insight_facade()
+    second = container.get_insight_facade()
+
+    assert first is second
+
+
 def test_ensure_dir_exists_creates_sqlite_parent(tmp_path) -> None:
     db_path = tmp_path / "nested" / "witty.db"
 

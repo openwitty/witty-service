@@ -11,6 +11,7 @@ INSIGHT_UNAVAILABLE = "INSIGHT_UNAVAILABLE"
 INSIGHT_TIMEOUT = "INSIGHT_TIMEOUT"
 INSIGHT_UPSTREAM_ERROR = "INSIGHT_UPSTREAM_ERROR"
 INSIGHT_BAD_RESPONSE = "INSIGHT_BAD_RESPONSE"
+INSIGHT_SESSION_MAPPING_NOT_FOUND = "INSIGHT_SESSION_MAPPING_NOT_FOUND"
 
 
 class DomainError(Exception):
@@ -169,4 +170,22 @@ def insight_bad_response(*, base_url: str, path: str, reason: str) -> DomainErro
         message="witty insight returned an invalid response",
         status_code=502,
         details={"base_url": base_url, "path": path, "reason": reason},
+    )
+
+
+def insight_session_mapping_not_found(
+    *,
+    session_id: str,
+    runtime_type: str | None,
+    runtime_session_id: str | None,
+) -> DomainError:
+    return DomainError(
+        code=INSIGHT_SESSION_MAPPING_NOT_FOUND,
+        message="witty session is not mapped to a runtime insight session",
+        status_code=404,
+        details={
+            "session_id": session_id,
+            "runtime_type": runtime_type,
+            "runtime_session_id": runtime_session_id,
+        },
     )
