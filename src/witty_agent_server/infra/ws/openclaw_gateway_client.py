@@ -109,7 +109,7 @@ class OpenClawGatewayClient(ClientBase):
                     method="sessions.messages.subscribe",
                     params={"key": session_key},
                 )
-                # self._ensure_session_change_streaming(ws=ws)
+                self._ensure_session_change_streaming(ws=ws)
                 self._ensure_tool_output_streaming(ws=ws, session_key=session_key)
                 payload = self._rpc(
                     ws,
@@ -145,6 +145,7 @@ class OpenClawGatewayClient(ClientBase):
                             method="sessions.messages.subscribe",
                             params={"key": session_key},
                         )
+                        self._ensure_session_change_streaming(ws=ws)
                         self._ensure_tool_output_streaming(
                             ws=ws, session_key=session_key
                         )
@@ -588,7 +589,7 @@ class OpenClawGatewayClient(ClientBase):
             event_name = message.get("event")
             if not isinstance(event_name, str):
                 continue
-            if event_name not in {"agent", "session.message"}:
+            if event_name not in {"agent", "session.message", "sessions.changed"}:
                 continue
             payload = message.get("payload")
             normalized_payload = payload if isinstance(payload, dict) else {}
@@ -635,6 +636,22 @@ class OpenClawGatewayClient(ClientBase):
                     )
                     if stop_reason == "stop" and not has_text:
                         continue
+            if event_name == "sessions.changed":
+                runtime_session_id = self._extract_runtime_session_id(
+                    normalized_payload
+                )
+                if runtime_session_id is None:
+                    continue
+                if event_session_key is None:
+                    logger.warning(
+                        (
+                            "accept sessions.changed without sessionKey; "
+                            "session attribution relies on current stream: "
+                            "session_key=%s runtime_session_id=%s"
+                        ),
+                        session_key,
+                        runtime_session_id,
+                    )
             event = {
                 "type": event_name,
                 "payload": normalized_payload,
@@ -715,6 +732,11 @@ class OpenClawGatewayClient(ClientBase):
             data_key = data.get("sessionKey")
             if isinstance(data_key, str) and data_key:
                 return data_key
+        session = payload.get("session")
+        if isinstance(session, dict):
+            session_key = session.get("sessionKey")
+            if isinstance(session_key, str) and session_key:
+                return session_key
         return None
 
     # 兼容网关返回带命名空间前缀的 sessionKey（如 agent:main:<session_id>）。
@@ -738,6 +760,22 @@ class OpenClawGatewayClient(ClientBase):
         data = payload.get("data")
         if isinstance(data, dict):
             nested = data.get("runId")
+            if isinstance(nested, str) and nested:
+                return nested
+        return None
+
+    def _extract_runtime_session_id(self, payload: dict[str, Any]) -> str | None:
+        direct = payload.get("sessionId")
+        if isinstance(direct, str) and direct:
+            return direct
+        data = payload.get("data")
+        if isinstance(data, dict):
+            nested = data.get("sessionId")
+            if isinstance(nested, str) and nested:
+                return nested
+        session = payload.get("session")
+        if isinstance(session, dict):
+            nested = session.get("sessionId")
             if isinstance(nested, str) and nested:
                 return nested
         return None

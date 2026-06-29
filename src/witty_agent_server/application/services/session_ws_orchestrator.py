@@ -211,6 +211,18 @@ class SessionWSOrchestrator:
                     runtime_session_key=identity.runtime_session_key,
                     runtime_session_id=runtime_session_id,
                 )
+            forwarded_payload = dict(normalized_payload)
+            forwarded_payload.setdefault(
+                "runtime_session_key",
+                identity.runtime_session_key,
+            )
+            yield build_outbound_event(
+                agent_id=agent_id,
+                session_id=session_id,
+                runtime_type=runtime_type,
+                type=event_type,
+                payload=forwarded_payload,
+            )
             return
 
         self._append_session_event(

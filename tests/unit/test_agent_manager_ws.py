@@ -110,6 +110,7 @@ class FakeRepository:
         updated = AgentRecord(
             id=current.id,
             name=current.name,
+            description=current.description,
             sandbox_type=current.sandbox_type,
             adapter_type=current.adapter_type,
             status=status,
@@ -117,6 +118,8 @@ class FakeRepository:
             workspace_path=current.workspace_path,
             idle_timeout_seconds=current.idle_timeout_seconds,
             has_scheduled_tasks=current.has_scheduled_tasks,
+            model_id=current.model_id,
+            mcp_server_list=current.mcp_server_list,
             last_active_at=current.last_active_at,
             created_at=current.created_at,
             updated_at=updated_at or datetime.now(UTC),
@@ -177,6 +180,7 @@ class FakeRepository:
         session = SessionRecord(
             id=f"session-{self.session_counter}",
             agent_id=agent_id,
+            remote_runtime_agent_id=f"runtime-agent-{self.session_counter}",
             status="active",
             created_at=now,
             updated_at=now,
@@ -187,6 +191,84 @@ class FakeRepository:
     def get_session(self, session_id: str) -> Any | None:
         return self.sessions.get(session_id)
 
+    def upsert_session(
+        self,
+        session_id: str,
+        agent_id: str,
+        status: str,
+        context_initialized: bool = False,
+        runtime_type: str | None = None,
+        runtime_session_key: str | None = None,
+        created_at: datetime | None = None,
+        remote_runtime_agent_id: str | None = None,
+    ) -> Any:
+        now = datetime.now(UTC)
+        from witty_service.persistence.repositories import SessionRecord
+
+        existing = self.sessions.get(session_id)
+        session = SessionRecord(
+            id=session_id,
+            agent_id=agent_id,
+            remote_runtime_agent_id=(
+                remote_runtime_agent_id
+                or (existing.remote_runtime_agent_id if existing is not None else None)
+            ),
+            status=status,
+            created_at=created_at or (existing.created_at if existing is not None else now),
+            updated_at=now,
+            runtime_type=runtime_type or (existing.runtime_type if existing is not None else None),
+            runtime_session_id=existing.runtime_session_id if existing is not None else None,
+            runtime_session_key=(
+                runtime_session_key
+                or (existing.runtime_session_key if existing is not None else None)
+            ),
+            title=existing.title if existing is not None else None,
+            pinned=existing.pinned if existing is not None else False,
+        )
+        self.sessions[session_id] = session
+        return session
+
+    def update_session_runtime_identity(
+        self,
+        *,
+        session_id: str,
+        runtime_type: str,
+        runtime_session_id: str,
+        runtime_session_key: str,
+    ) -> Any:
+        current = self.sessions[session_id]
+        updated = replace(
+            current,
+            runtime_type=runtime_type,
+            runtime_session_id=runtime_session_id,
+            runtime_session_key=runtime_session_key,
+            updated_at=datetime.now(UTC),
+        )
+        self.sessions[session_id] = updated
+        return updated
+
+    def get_last_assistant_status(self, session_id: str) -> str | None:
+        return None
+
+    def get_first_user_message(self, session_id: str) -> str | None:
+        return None
+
+    def update_session_metadata(
+        self,
+        session_id: str,
+        *,
+        title: str | None = None,
+        pinned: bool | None = None,
+    ) -> Any:
+        current = self.sessions[session_id]
+        updated = replace(
+            current,
+            title=title if title is not None else current.title,
+            pinned=pinned if pinned is not None else current.pinned,
+            updated_at=datetime.now(UTC),
+        )
+        self.sessions[session_id] = updated
+        return updated
 
 class FakeWorkspaceStore:
     def init_workspace(self, agent_id: str) -> Path:
@@ -266,6 +348,9 @@ class MockWebSocketClient:
                 yield event
         return gen()
 
+    async def close(self) -> None:
+        self.is_connected = False
+
 
 def _make_ws_manager(
     ws_client_pool: WebSocketClientPool | None = None,
@@ -308,6 +393,87 @@ def _create_agent_with_sandbox(manager: AgentManager, request: AgentCreateReques
     agent = result.agent
     session = result.default_session
     return agent, session
+
+
+def _bootstrap_running_agent_and_session(repository: FakeRepository) -> tuple[Any, Any]:
+    agent = repository.create_agent_with_id(
+        agent_id="agent-1",
+        name="demo",
+        description="",
+        sandbox_type="local_process",
+        adapter_type="http",
+        workspace_path="/tmp/agent-1/workspace",
+        idle_timeout_seconds=300,
+        status=AgentStatus.running,
+        mcp_server_list=[],
+    )
+    repository.save_sandbox_state(
+        agent.id,
+        sandbox_payload_json={
+            "sandbox_id": f"sandbox-{agent.id}",
+            "agent_id": agent.id,
+            "workspace_path": agent.workspace_path,
+            "metadata": {},
+        },
+        adapter_base_url="http://adapter.local",
+        adapter_ready=True,
+    )
+    session = repository.upsert_session(
+        session_id="session-1",
+        agent_id=agent.id,
+        status="running",
+        runtime_type="openclaw",
+        remote_runtime_agent_id="runtime-agent-1",
+    )
+    return agent, session
+
+
+def test_send_message_uses_websocket_and_syncs_runtime_session_identity():
+    async def run() -> None:
+        manager, _, repository, _, _, ws_client_pool = _make_ws_manager()
+        agent, session = _bootstrap_running_agent_and_session(repository)
+
+        mock_ws_client = MockWebSocketClient(base_url="ws://adapter/test")
+        mock_ws_client.set_events([
+            InboundEvent(
+                type="session.runtime.changed",
+                session_id=session.id,
+                runtime_type="openclaw",
+                event_id="evt-1",
+                ts_ms=1000,
+                payload={
+                    "runtime_session_id": "runtime-session-1",
+                    "runtime_session_key": "agent:1:session:key-1",
+                },
+            ),
+            InboundEvent(
+                type="message.completed",
+                session_id=session.id,
+                runtime_type="openclaw",
+                event_id="evt-2",
+                ts_ms=2000,
+                payload={},
+            ),
+        ])
+
+        with patch.object(
+            ws_client_pool,
+            "get_client",
+            return_value=mock_ws_client,
+        ):
+            events = await manager.send_message(agent.id, session.id, "hello from user")
+
+        assert mock_ws_client.connect_calls == [session.id]
+        assert mock_ws_client.send_calls == [
+            {"type": "message.create", "payload": {"message": "hello from user"}}
+        ]
+        assert [event["type"] for event in events["events"]] == ["message.completed"]
+        synced_session = repository.sessions[session.id]
+        assert synced_session.runtime_type == "openclaw"
+        assert synced_session.runtime_session_id == "runtime-session-1"
+        assert synced_session.runtime_session_key == "agent:1:session:key-1"
+
+    asyncio.run(run())
 
 
 @pytest.mark.skip(reason="sandbox health check 30 次循环导致单用例约 30 秒,源代码未修复前暂跳过")

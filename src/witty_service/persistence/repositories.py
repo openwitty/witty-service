@@ -78,6 +78,9 @@ class SessionRecord:
     status: str
     created_at: datetime
     updated_at: datetime
+    runtime_type: str | None = None
+    runtime_session_id: str | None = None
+    runtime_session_key: str | None = None
     title: str | None = None
     pinned: bool = False
 
@@ -497,6 +500,7 @@ class SqliteRepository:
         status: str,
         context_initialized: bool = False,
         runtime_type: str | None = None,
+        runtime_session_key: str | None = None,
         created_at: datetime | None = None,
         remote_runtime_agent_id: str | None = None,
     ) -> SessionRecord:
@@ -510,6 +514,8 @@ class SqliteRepository:
                     id=session_id,
                     agent_id=agent_id,
                     remote_runtime_agent_id=remote_runtime_agent_id,
+                    runtime_type=runtime_type,
+                    runtime_session_key=runtime_session_key,
                     status=SessionStatus(status),
                     created_at=created_at or now,
                     updated_at=now,
@@ -517,6 +523,10 @@ class SqliteRepository:
                 session.add(row)
             else:
                 existing.status = SessionStatus(status)
+                existing.runtime_type = runtime_type or existing.runtime_type
+                existing.runtime_session_key = (
+                    runtime_session_key or existing.runtime_session_key
+                )
                 existing.remote_runtime_agent_id = (
                     remote_runtime_agent_id or existing.remote_runtime_agent_id
                 )
@@ -525,6 +535,28 @@ class SqliteRepository:
             session.commit()
             session.refresh(existing or row)
             return self._to_session_record(existing or row)
+
+    def update_session_runtime_identity(
+        self,
+        *,
+        session_id: str,
+        runtime_type: str,
+        runtime_session_id: str,
+        runtime_session_key: str,
+    ) -> SessionRecord:
+        with self._session_factory() as session:
+            row = session.get(SessionORM, session_id)
+            if row is None:
+                raise KeyError(f"Session not found: {session_id}")
+
+            row.runtime_type = runtime_type
+            row.runtime_session_id = runtime_session_id
+            row.runtime_session_key = runtime_session_key
+            row.updated_at = datetime.now(timezone.utc)
+
+            session.commit()
+            session.refresh(row)
+            return self._to_session_record(row)
 
     def delete_session(self, session_id: str) -> None:
         with self._session_factory() as session:
@@ -706,6 +738,19 @@ class SqliteRepository:
                 .filter(
                     MessageORM.session_id == session_id,
                     MessageORM.role == "assistant",
+                )
+                .order_by(MessageORM.created_at.desc())
+                .first()
+            )
+
+    def find_generating_message_for_session(self, session_id: str) -> MessageORM | None:
+        with self._session_factory() as session:
+            return (
+                session.query(MessageORM)
+                .filter(
+                    MessageORM.session_id == session_id,
+                    MessageORM.role == "assistant",
+                    MessageORM.status == MessageStatus.generating,
                 )
                 .order_by(MessageORM.created_at.desc())
                 .first()
@@ -979,6 +1024,9 @@ class SqliteRepository:
             status=row.status.value
             if isinstance(row.status, SessionStatus)
             else row.status,
+            runtime_type=row.runtime_type,
+            runtime_session_id=row.runtime_session_id,
+            runtime_session_key=row.runtime_session_key,
             title=row.title,
             pinned=row.pinned,
             created_at=row.created_at,

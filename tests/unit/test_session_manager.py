@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
+import httpx
 import pytest
 
 from witty_service.application.session_manager import (
@@ -20,6 +21,7 @@ class RepositoryStub:
         self.sessions = {}
         self.deleted = []
         self.upserts = []
+        self.identity_updates = []
 
     def create_session(self, agent_id: str):
         session = SimpleNamespace(id="session-new", agent_id=agent_id)
@@ -44,11 +46,26 @@ class RepositoryStub:
             status=kwargs["status"],
             context_initialized=kwargs.get("context_initialized", False),
             runtime_type=kwargs.get("runtime_type"),
+            runtime_session_id=kwargs.get("runtime_session_id"),
+            runtime_session_key=kwargs.get("runtime_session_key"),
             created_at=kwargs.get("created_at"),
             remote_runtime_agent_id=kwargs.get("remote_runtime_agent_id"),
         )
         self.sessions[session.id] = session
         return session
+
+    def update_session_runtime_identity(self, **kwargs):
+        self.identity_updates.append(kwargs)
+        session = self.sessions[kwargs["session_id"]]
+        payload = dict(session.__dict__)
+        payload.update(
+            runtime_type=kwargs["runtime_type"],
+            runtime_session_id=kwargs["runtime_session_id"],
+            runtime_session_key=kwargs["runtime_session_key"],
+        )
+        updated = SimpleNamespace(**payload)
+        self.sessions[updated.id] = updated
+        return updated
 
     def get_agent(self, agent_id: str):
         return self.agents.get(agent_id)
@@ -187,6 +204,32 @@ async def test_remote_session_methods_sync_repository() -> None:
     assert repo.deleted == ["remote-session-1"]
 
 
+@pytest.mark.asyncio
+async def test_get_session_remote_404_cleans_local_session_cache() -> None:
+    repo = RepositoryStub()
+    manager = SessionManager(repo)
+    client = AdaptorClientStub()
+    repo.upsert_session(
+        session_id="remote-session-404",
+        agent_id="agent-1",
+        status="idle",
+        remote_runtime_agent_id="runtime-explicit",
+    )
+
+    async def raise_404(path: str):
+        request = httpx.Request("GET", f"https://example.test{path}")
+        response = httpx.Response(404, request=request)
+        raise httpx.HTTPStatusError("not found", request=request, response=response)
+
+    client.get = raise_404
+
+    with pytest.raises(DomainError) as exc_info:
+        await manager.get_session_remote("agent-1", "remote-session-404", client)
+
+    assert exc_info.value.code == SESSION_NOT_FOUND
+    assert repo.deleted == ["remote-session-404"]
+
+
 def test_upsert_session_delegates_all_fields() -> None:
     repo = RepositoryStub()
     manager = SessionManager(repo)
@@ -209,6 +252,34 @@ def test_upsert_session_delegates_all_fields() -> None:
         "status": "idle",
         "context_initialized": True,
         "runtime_type": "openclaw",
+        "runtime_session_key": None,
         "created_at": created_at,
         "remote_runtime_agent_id": "runtime-1",
+    }
+
+
+def test_update_session_runtime_identity_delegates_to_repository() -> None:
+    repo = RepositoryStub()
+    manager = SessionManager(repo)
+    repo.upsert_session(
+        session_id="session-1",
+        agent_id="agent-1",
+        status="idle",
+    )
+
+    session = manager.update_session_runtime_identity(
+        session_id="session-1",
+        runtime_type="openclaw",
+        runtime_session_id="runtime-session-1",
+        runtime_session_key="agent:agent-1:session:session-1",
+    )
+
+    assert session.runtime_type == "openclaw"
+    assert session.runtime_session_id == "runtime-session-1"
+    assert session.runtime_session_key == "agent:agent-1:session:session-1"
+    assert repo.identity_updates[-1] == {
+        "session_id": "session-1",
+        "runtime_type": "openclaw",
+        "runtime_session_id": "runtime-session-1",
+        "runtime_session_key": "agent:agent-1:session:session-1",
     }

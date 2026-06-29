@@ -68,6 +68,7 @@ def _create_session(
         agent_id=agent_id,
         status="idle",
         runtime_type="openclaw",
+        runtime_session_key=f"agent:{agent_id}:session:{session_id}",
         remote_runtime_agent_id="runtime-agent-1",
     )
 
@@ -122,6 +123,7 @@ def test_session_upsert_list_update_and_delete(repo: SqliteRepository) -> None:
         session_id="session-1",
         agent_id="agent-1",
         status="running",
+        runtime_type="openclaw",
         remote_runtime_agent_id=None,
     )
     metadata = repo.update_session_metadata(
@@ -131,7 +133,11 @@ def test_session_upsert_list_update_and_delete(repo: SqliteRepository) -> None:
     )
 
     assert created is not None
+    assert created.runtime_type == "openclaw"
+    assert created.runtime_session_key == "agent:agent-1:session:session-1"
+    assert created.runtime_session_id is None
     assert updated.status == "running"
+    assert updated.runtime_type == "openclaw"
     assert updated.remote_runtime_agent_id == "runtime-agent-1"
     assert metadata.title == "Important chat"
     assert metadata.pinned is True
@@ -162,6 +168,48 @@ def test_sandbox_state_round_trip_and_handle(repo: SqliteRepository) -> None:
     assert fetched.handle.sandbox_id == "sandbox-1"
     assert fetched.handle.workspace_path == "/tmp/agent-1"
     assert fetched.handle.metadata == {"port": 18080}
+
+
+def test_update_session_runtime_identity_persists_and_overwrites(
+    repo: SqliteRepository,
+) -> None:
+    _create_agent(repo)
+    _create_session(repo, session_id="session-1")
+
+    created = repo.update_session_runtime_identity(
+        session_id="session-1",
+        runtime_type="openclaw",
+        runtime_session_id="runtime-session-1",
+        runtime_session_key="agent:agent-1:session:session-1",
+    )
+    updated = repo.update_session_runtime_identity(
+        session_id="session-1",
+        runtime_type="openclaw",
+        runtime_session_id="runtime-session-2",
+        runtime_session_key="agent:agent-1:session:session-1",
+    )
+
+    assert created.runtime_type == "openclaw"
+    assert created.runtime_session_id == "runtime-session-1"
+    assert created.runtime_session_key == "agent:agent-1:session:session-1"
+    assert updated.id == created.id
+    assert updated.runtime_type == "openclaw"
+    assert updated.runtime_session_id == "runtime-session-2"
+    assert updated.runtime_session_key == "agent:agent-1:session:session-1"
+
+
+def test_update_session_runtime_identity_requires_existing_session(
+    repo: SqliteRepository,
+) -> None:
+    _create_agent(repo)
+
+    with pytest.raises(KeyError, match="Session not found: missing-session"):
+        repo.update_session_runtime_identity(
+            session_id="missing-session",
+            runtime_type="openclaw",
+            runtime_session_id="runtime-session-1",
+            runtime_session_key="agent:agent-1:session:missing-session",
+        )
 
 
 def test_message_events_retry_and_summary_methods(

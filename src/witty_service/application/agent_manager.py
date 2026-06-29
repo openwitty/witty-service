@@ -196,6 +196,15 @@ class AgentRepository(Protocol):
 
     def find_last_assistant_message_for_session(self, session_id: str) -> Any | None: ...
 
+    def update_session_runtime_identity(
+        self,
+        *,
+        session_id: str,
+        runtime_type: str,
+        runtime_session_id: str,
+        runtime_session_key: str,
+    ) -> SessionRecord: ...
+
     def compact_message_delta_events(self, message_id: str) -> None: ...
 
     def delete_agent(self, agent_id: str) -> None: ...
@@ -1144,6 +1153,11 @@ class AgentManager:
         try:
             async for event in ws_client.recv():
                 event_dict = dict(event)
+                self._sync_runtime_session_identity_from_event(
+                    agent_id=agent_id,
+                    session_id=session_id,
+                    event=event_dict,
+                )
                 # 刷新session状态
                 self._sync_session_state_from_event(
                     agent_id=agent_id,
@@ -1256,6 +1270,11 @@ class AgentManager:
             try:
                 async for event in ws_client.recv():
                     event_dict = dict(event)
+                    self._sync_runtime_session_identity_from_event(
+                        agent_id=agent_id,
+                        session_id=session_id,
+                        event=event_dict,
+                    )
                     self._sync_session_state_from_event(
                         agent_id=agent_id,
                         session_id=session_id,
@@ -1856,10 +1875,73 @@ class AgentManager:
                 exc_info=True,
             )
 
+    def _sync_runtime_session_identity_from_event(
+        self,
+        *,
+        agent_id: str,
+        session_id: str,
+        event: dict[str, Any],
+    ) -> None:
+        if event.get("type") != "session.runtime.changed":
+            return
+
+        payload = event.get("payload")
+        normalized_payload = payload if isinstance(payload, dict) else {}
+        runtime_session_id = normalized_payload.get("runtime_session_id")
+        runtime_session_key = normalized_payload.get("runtime_session_key")
+        runtime_type = event.get("runtime_type")
+
+        if not isinstance(runtime_session_id, str) or not runtime_session_id:
+            self._logger.warning(
+                "skip runtime session identity sync due to missing runtime_session_id: "
+                "agent_id=%s session_id=%s",
+                agent_id,
+                session_id,
+            )
+            return
+        if not isinstance(runtime_session_key, str) or not runtime_session_key:
+            self._logger.warning(
+                "skip runtime session identity sync due to missing runtime_session_key: "
+                "agent_id=%s session_id=%s",
+                agent_id,
+                session_id,
+            )
+            return
+        if not isinstance(runtime_type, str) or not runtime_type:
+            self._logger.warning(
+                "skip runtime session identity sync due to missing runtime_type: "
+                "agent_id=%s session_id=%s",
+                agent_id,
+                session_id,
+            )
+            return
+
+        try:
+            self._session_manager.get_session(agent_id, session_id)
+            self._session_manager.update_session_runtime_identity(
+                session_id=session_id,
+                runtime_type=runtime_type,
+                runtime_session_id=runtime_session_id,
+                runtime_session_key=runtime_session_key,
+            )
+        except Exception:
+            self._logger.exception(
+                "failed to sync runtime session identity: "
+                "agent_id=%s session_id=%s runtime_type=%s runtime_session_id=%s",
+                agent_id,
+                session_id,
+                runtime_type,
+                runtime_session_id,
+            )
+
     def _should_filter_session_event(self, event: dict[str, Any]) -> bool:
         """过滤仅用于本地 session 状态同步的内部事件。"""
         event_type = event.get("type")
-        return event_type in {"session.state_changed", "session.heartbeat"}
+        return event_type in {
+            "session.state_changed",
+            "session.heartbeat",
+            "session.runtime.changed",
+        }
 
     def _get_sandbox_state(self, agent_id: str) -> SandboxState:
         sandbox_state = self._repository.get_sandbox_state(agent_id)

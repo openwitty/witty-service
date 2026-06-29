@@ -121,6 +121,26 @@ class OpenClawGatewayRuntime(RuntimeBase):
                 yield {"type": "session.usage", "payload": normalized_payload}
             return
 
+        if raw_type == "sessions.changed":
+            runtime_session_id = self._pick_string(normalized_payload, "sessionId")
+            if runtime_session_id is None:
+                data = normalized_payload.get("data")
+                if isinstance(data, dict):
+                    runtime_session_id = self._pick_string(data, "sessionId")
+            if runtime_session_id is None:
+                session = normalized_payload.get("session")
+                if isinstance(session, dict):
+                    runtime_session_id = self._pick_string(session, "sessionId")
+            if runtime_session_id is None:
+                return
+            yield {
+                "type": "session.runtime.changed",
+                "payload": {
+                    "runtime_session_id": runtime_session_id,
+                },
+            }
+            return
+
         if raw_type == "agent":
             stream = normalized_payload.get("stream")
             if not isinstance(stream, str):
