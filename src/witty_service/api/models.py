@@ -36,6 +36,9 @@ def create_model(
     payload: CreateModelRequest,
     services: ServiceContainer = Depends(get_services),
 ) -> ModelResponse:
+    import logging
+    logger = logging.getLogger(__name__)
+    
     api_base_url = payload.api_base_url
     if api_base_url is None:
         api_base_url = DEFAULT_API_BASE_URLS.get(payload.provider)
@@ -45,6 +48,7 @@ def create_model(
         provider=payload.provider,
         api_key=payload.api_key,
         api_base_url=api_base_url,
+        compatibility=payload.compatibility,
         enabled=payload.enabled,
         max_tokens=payload.max_tokens,
         temperature=payload.temperature,
@@ -97,6 +101,7 @@ def update_model(
         provider=payload.provider,
         api_key=payload.api_key,
         api_base_url=api_base_url,
+        compatibility=payload.compatibility,
         enabled=payload.enabled,
         max_tokens=payload.max_tokens,
         temperature=payload.temperature,
@@ -111,6 +116,7 @@ def _to_model_response(model: ModelRecord) -> ModelResponse:
         name=model.name,
         provider=model.provider,
         api_base_url=model.api_base_url,
+        compatibility=model.compatibility,
         enabled=model.enabled,
         max_tokens=model.max_tokens,
         temperature=model.temperature,

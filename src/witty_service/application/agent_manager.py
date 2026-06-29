@@ -738,6 +738,7 @@ class AgentManager:
                 "provider": model.provider,
                 "api_key": model.api_key,
                 "api_base_url": model.api_base_url,
+                "compatibility": model.compatibility,
             }
         else:
             model_info = {}
@@ -1066,6 +1067,7 @@ class AgentManager:
                     "provider": model.provider,
                     "api_key": model.api_key,
                     "api_base_url": model.api_base_url,
+                    "compatibility": model.compatibility,
                 }
             else:
                 model_info = {}
@@ -1265,8 +1267,8 @@ class AgentManager:
                         error_code = error_payload.get("code", "UNKNOWN_ERROR")
                         error_message = error_payload.get("message", "Unknown error from adaptor")
                         self._logger.error(
-                            "Stream error in background consumer: agent_id=%s session_id=%s code=%s",
-                            agent_id, session_id, error_code,
+                            "Stream error in background consumer: agent_id=%s session_id=%s code=%s message=%s",
+                            agent_id, session_id, error_code, error_message,
                         )
                         _stream_registry.end_stream(session_id)
                         return

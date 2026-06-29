@@ -113,6 +113,7 @@ class CreateModelRequest(BaseModel):
     provider: str = Field(min_length=1)
     api_key: str = Field(min_length=1)
     api_base_url: str | None = None
+    compatibility: str | None = None  # 暂时移除正则验证，便于调试
     enabled: bool = True
     max_tokens: int = 4096
     temperature: float = 0.7
@@ -124,6 +125,7 @@ class UpdateModelRequest(BaseModel):
     provider: str | None = Field(None, min_length=1)
     api_key: str | None = Field(None, min_length=1)
     api_base_url: str | None = None
+    compatibility: str | None = None  # 暂时移除正则验证，便于调试
     enabled: bool | None = None
     max_tokens: int | None = None
     temperature: float | None = None
@@ -136,6 +138,7 @@ class ModelResponse(BaseModel):
     name: str
     provider: str
     api_base_url: str | None
+    compatibility: str | None
     enabled: bool
     max_tokens: int
     temperature: float

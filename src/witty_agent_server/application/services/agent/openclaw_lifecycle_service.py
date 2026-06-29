@@ -349,6 +349,9 @@ class OpenClawLifecycleService:
         skip_search: bool = True,
         skip_hooks: bool = True,
         skip_health: bool = False,
+        custom_base_url: str | None = None,
+        custom_model_id: str | None = None,
+        custom_compatibility: str | None = None,
     ) -> None:
         if not self._profile:
             raise OpenClawLifecycleError(
@@ -366,7 +369,7 @@ class OpenClawLifecycleService:
             "--accept-risk",
             "--auth-choice",
             auth_choice,
-            f"--{auth_choice}",
+            "--{auth_choice}",
             api_key,
         ]
         if self._gateway_port:
@@ -381,6 +384,15 @@ class OpenClawLifecycleService:
             command.append("--skip-hooks")
         if skip_health:
             command.append("--skip-health")
+        
+        # 当使用 custom-api-key 认证时，添加自定义参数
+        if auth_choice == "custom-api-key":
+            if custom_base_url:
+                command.extend(["--custom-base-url", custom_base_url])
+            if custom_model_id:
+                command.extend(["--custom-model-id", custom_model_id])
+            if custom_compatibility:
+                command.extend(["--custom-compatibility", custom_compatibility])
 
         result = self._run_command(command)
         if result.returncode != 0:

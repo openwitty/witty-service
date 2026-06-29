@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import Engine, create_engine, event
+from sqlalchemy import Engine, create_engine, event, inspect, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from witty_service.persistence.orm import Base
@@ -22,7 +22,20 @@ def create_session_factory(engine: Engine) -> sessionmaker[Session]:
 
 def init_db(engine: Engine) -> None:
     # Test/local bootstrap only. Production schema management should go through Alembic migrations.
+    _migrate_models_table(engine)
     Base.metadata.create_all(bind=engine)
+
+
+def _migrate_models_table(engine: Engine) -> None:
+    """自动迁移 models 表，添加缺失的 compatibility 列"""
+    inspector = inspect(engine)
+    if inspector.has_table("models"):
+        columns = inspector.get_columns("models")
+        column_names = {col["name"] for col in columns}
+        if "compatibility" not in column_names:
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE models ADD COLUMN compatibility VARCHAR(16)"))
+                conn.commit()
 
 
 def _enable_sqlite_foreign_keys(engine: Engine) -> None:
