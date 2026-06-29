@@ -147,12 +147,6 @@ class OpenClawOnboardError(OpenClawLifecycleError):
 
 
 class OpenClawLifecycleService:
-    # 映射 auth_choice -> 实际 API key 的 flag 名（当 flag 名与 auth_choice 不一致时）
-    AUTH_CHOICE_TO_KEY_FLAG: dict[str, str] = {
-        "qwen-api-key": "--modelstudio-api-key",
-        "minimax-cn-api": "--minimax-api-key",
-    }
-
     def __init__(
         self,
         runner: CommandRunner | None = None,
@@ -369,14 +363,13 @@ class OpenClawLifecycleService:
                 message="profile is required for onboard",
             )
 
-        key_flag = self.AUTH_CHOICE_TO_KEY_FLAG.get(auth_choice, f"--{auth_choice}")
         command = self._build_base_command() + [
             "onboard",
             "--non-interactive",
             "--accept-risk",
             "--auth-choice",
             auth_choice,
-            key_flag,
+            "--{auth_choice}",
             api_key,
         ]
         if self._gateway_port:
