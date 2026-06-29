@@ -37,7 +37,7 @@ Witty Service 统一配置管理
     OPENCLAW_CONFIG_PATH            OpenClaw配置文件路径 (默认: ~/.openclaw/openclaw.json)
 
     # Witty Insight 配置
-    WITTY_INSIGHT_ENABLED          是否启用 insight 集成 (默认: false)
+    WITTY_INSIGHT_ENABLED          是否启用 insight 集成 (默认: true)
     WITTY_INSIGHT_BASE_URL         insight API 地址 (默认: http://127.0.0.1:7396)
     WITTY_INSIGHT_TIMEOUT_SECONDS  insight 请求超时(秒) (默认: 10)
     WITTY_INSIGHT_BEARER_TOKEN     insight Bearer Token (可选)
@@ -283,13 +283,13 @@ class InsightSettings:
     """Witty Insight 上游服务配置
 
     环境变量:
-        WITTY_INSIGHT_ENABLED: 是否启用 insight 集成, 默认 false
+        WITTY_INSIGHT_ENABLED: 是否启用 insight 集成, 默认 true
         WITTY_INSIGHT_BASE_URL: insight API 地址, 默认 http://127.0.0.1:7396
         WITTY_INSIGHT_TIMEOUT_SECONDS: insight 请求超时(秒), 默认 10
         WITTY_INSIGHT_BEARER_TOKEN: 调用 insight 时附带的 Bearer Token, 可选
     """
 
-    enabled: bool = False
+    enabled: bool = True
     base_url: str = "http://127.0.0.1:7396"
     timeout_seconds: float = 10.0
     bearer_token: str | None = None
@@ -299,7 +299,7 @@ class InsightSettings:
         raw_token = os.getenv("WITTY_INSIGHT_BEARER_TOKEN")
         bearer_token = raw_token.strip() or None if raw_token is not None else None
         return cls(
-            enabled=os.getenv("WITTY_INSIGHT_ENABLED", "false").lower() in ("1", "true", "yes"),
+            enabled=os.getenv("WITTY_INSIGHT_ENABLED", "true").lower() in ("1", "true", "yes"),
             base_url=os.getenv("WITTY_INSIGHT_BASE_URL", "http://127.0.0.1:7396"),
             timeout_seconds=float(os.getenv("WITTY_INSIGHT_TIMEOUT_SECONDS", "10")),
             bearer_token=bearer_token,

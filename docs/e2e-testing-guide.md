@@ -10,6 +10,7 @@
 - Agent 生命周期：`/agents/*`
 - Session：`/agents/{agent_id}/sessions/*`
 - 消息接口：`/agents/{agent_id}/sessions/{session_id}/messages`、`/agents/{agent_id}/sessions/{session_id}/messages/stream`
+- Insight BFF：`/insight/*`
 - 健康检查：`/healthz`
 
 ## 1. 开发环境设置
@@ -151,6 +152,18 @@ curl -s http://127.0.0.1:8000/healthz
 | `/mcp-servers/{server_id}` | `DELETE` | 删除 MCP Server 配置 |
 | `/agents/{agent_id}/mcp-servers/{server_id}/enable` | `POST` | 启用 MCP Server：执行 `_setup_mcp`，将配置应用到 runtime |
 | `/agents/{agent_id}/mcp-servers/{server_id}/disable` | `POST` | 卸载 MCP Server：执行 `openclaw mcp unset`，从 runtime 移除配置 |
+| `/insight/capabilities` | `GET` | 探测 Insight 集成是否启用及上游是否可达 |
+| `/insight/witty-agents` | `GET` | 获取纳管的 Witty agent 列表 |
+| `/insight/sessions` | `GET` | 获取纳管 session 视图，支持按 `witty_agent_id` 过滤 |
+| `/insight/sessions/{session_id}/traces` | `GET` | 获取指定 Witty session 的 trace 列表 |
+| `/insight/traces/{trace_id}` | `GET` | 获取指定 trace 的详情 |
+| `/insight/conversations/{conversation_id}` | `GET` | 获取指定 conversation 的详情 |
+| `/insight/timeseries` | `GET` | 获取纳管 session 的 token/model 时序聚合 |
+| `/insight/interruptions/count` | `GET` | 获取中断总数与严重级别分布 |
+| `/insight/interruptions/stats` | `GET` | 获取按中断类型聚合的统计结果 |
+| `/insight/interruptions/session-counts` | `GET` | 获取按 Witty session 聚合的中断统计 |
+| `/insight/interruptions/conversation-counts` | `GET` | 获取按 conversation 聚合的中断统计 |
+| `/insight/agent-health` | `GET` | 获取纳管 agent 健康状态与孤立 runtime 诊断信息 |
 
 说明：
 - `GET /agents/{agent_id}/sessions`
@@ -167,6 +180,13 @@ Agent 接口与 `runtime_agent_id` 的关系：
 - 远端 `runtime_agent_id` 表示该进程内的 runtime agent / OpenClaw subagent
 - `POST /agents`、`GET /agents`、`GET /agents/{agent_id}`、`DELETE /agents/{agent_id}`、`POST /agents/{agent_id}/pause`、`POST /agents/{agent_id}/resume` 这些 Agent 生命周期接口**不直接接收** `runtime_agent_id`
 - `runtime_agent_id` 只影响 session 相关接口的远端路由选择，不改变 `witty-service` 自己的 agent 主键语义
+
+Insight BFF 接口说明：
+- `/insight/*` 由 `witty-service` 对外提供，是面向前端的聚合接口，不等同于 raw `witty-insight /api/*`
+- `session_id` 表示 Witty session id；`runtime_session_id` 仅作为辅助调试字段保留
+- `witty_agent_id` 是 Insight 数据的主过滤维度
+- `/insight/sessions`、`/insight/timeseries`、`/insight/interruptions/*` 只返回纳管的 managed session 视图，不包含未映射的 raw runtime 数据
+- `/insight/agent-health` 会返回纳管 agent 视图，并可额外包含 `orphan_runtimes` 作为诊断信息
 
 ### 3.3 Skills 仓库与技能目录接口
 
@@ -1498,3 +1518,7 @@ uv run pytest tests/ -q
 | `WITTY_DOCKER_IMAGE_TAG` | Docker 镜像标签 | `latest` |
 | `WITTY_DOCKER_CONTAINER_PORT` | 容器端口 | `8080` |
 | `WITTY_AGENT_SERVER_APP_DIR` | 本地进程模式 app 目录 | 空 |
+| `WITTY_INSIGHT_ENABLED` | 是否启用 witty-insight 集成 | `true` |
+| `WITTY_INSIGHT_BASE_URL` | witty-insight API 地址 | `http://127.0.0.1:7396` |
+| `WITTY_INSIGHT_TIMEOUT_SECONDS` | witty-insight 请求超时（秒） | `10` |
+| `WITTY_INSIGHT_BEARER_TOKEN` | 调用 witty-insight 时附带的 Bearer Token（可选） | 空 |

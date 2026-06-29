@@ -18,7 +18,7 @@ def test_insight_settings_defaults(monkeypatch) -> None:
 
     settings = config_module.InsightSettings.from_env()
 
-    assert settings.enabled is False
+    assert settings.enabled is True
     assert settings.base_url == "http://127.0.0.1:7396"
     assert settings.timeout_seconds == 10.0
     assert settings.bearer_token is None
@@ -36,6 +36,14 @@ def test_insight_settings_reads_env(monkeypatch) -> None:
     assert settings.base_url == "http://10.0.0.8:7396"
     assert settings.timeout_seconds == 3.5
     assert settings.bearer_token == "secret-token"
+
+
+def test_insight_settings_can_be_explicitly_disabled(monkeypatch) -> None:
+    monkeypatch.setenv("WITTY_INSIGHT_ENABLED", "false")
+
+    settings = config_module.InsightSettings.from_env()
+
+    assert settings.enabled is False
 
 
 def test_insight_settings_normalizes_blank_token_to_none(monkeypatch) -> None:

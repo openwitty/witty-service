@@ -190,4 +190,11 @@ def test_install_template_skills_records_inline_skill(tmp_path, monkeypatch) -> 
         skill_source=None,
         skill_md_url=None,
     )
-    assert (home / ".openclaw" / "skills" / ".inline_skills" / "helper.md").exists()
+    assert (
+        home
+        / ".openclaw"
+        / "workspace-agent-1"
+        / "skills"
+        / ".inline_skills"
+        / "helper.md"
+    ).exists()
