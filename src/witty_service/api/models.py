@@ -38,7 +38,6 @@ def create_model(
 ) -> ModelResponse:
     import logging
     logger = logging.getLogger(__name__)
-    logger.info(f"CreateModelRequest received: {payload.model_dump()}")
     
     api_base_url = payload.api_base_url
     if api_base_url is None:
