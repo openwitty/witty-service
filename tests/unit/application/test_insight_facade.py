@@ -608,10 +608,18 @@ def test_get_timeseries_filters_to_selected_managed_agent_sessions(
             "start_ns": 10,
             "end_ns": 20,
             "buckets": 5,
-            "session_ids": ["runtime-1"],
+            "session_id": "runtime-1",
         },
     )
     assert result == insight_client.timeseries_result
+
+
+def test_raw_params_use_singular_session_id_for_single_runtime_session() -> None:
+    from witty_service.application.insight_facade import InsightFacade
+
+    params = InsightFacade._raw_params(session_ids=["runtime-1"])
+
+    assert params == {"session_id": "runtime-1"}
 
 
 def test_get_interruption_count_filters_to_all_managed_runtime_sessions(

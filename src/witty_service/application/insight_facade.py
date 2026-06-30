@@ -370,7 +370,10 @@ class InsightFacade:
         if buckets is not None:
             params["buckets"] = buckets
         if session_ids:
-            params["session_ids"] = session_ids
+            if len(session_ids) == 1:
+                params["session_id"] = session_ids[0]
+            else:
+                params["session_ids"] = session_ids
         return params
 
     def _require_runtime_session(self, witty_session_id: str) -> SessionRecord:
