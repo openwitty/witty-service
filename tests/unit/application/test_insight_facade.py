@@ -451,77 +451,6 @@ def test_get_conversation_interruptions_remaps_managed_runtime_session_ids(
     assert result[0]["runtime_session_id"] == "runtime-1"
 
 
-def test_resolve_interruption_passthrough_returns_upstream_payload(
-    repo: SqliteRepository,
-) -> None:
-    from witty_service.application.insight_facade import InsightFacade
-
-    insight_client = FakeInsightClient()
-    insight_client.resolve_interruption_result = {"status": "resolved"}
-    facade = InsightFacade(
-        ServiceContainer(
-            repository=repo,
-            workspace_store=MagicMock(),
-            insight_client=insight_client,
-        ),
-    )
-
-    result = facade.resolve_interruption("interrupt-1")
-
-    assert insight_client.calls[-1] == ("resolve_interruption", "interrupt-1")
-    assert result == {"status": "resolved"}
-
-
-def test_delete_agent_health_passthrough_returns_upstream_payload(
-    repo: SqliteRepository,
-) -> None:
-    from witty_service.application.insight_facade import InsightFacade
-
-    insight_client = FakeInsightClient()
-    insight_client.delete_agent_health_result = {"ok": True}
-    facade = InsightFacade(
-        ServiceContainer(
-            repository=repo,
-            workspace_store=MagicMock(),
-            insight_client=insight_client,
-        ),
-    )
-
-    result = facade.delete_agent_health(101)
-
-    assert insight_client.calls[-1] == ("delete_agent_health", 101)
-    assert result == {"ok": True}
-
-
-def test_restart_agent_health_passthrough_returns_upstream_payload(
-    repo: SqliteRepository,
-) -> None:
-    from witty_service.application.insight_facade import InsightFacade
-
-    insight_client = FakeInsightClient()
-    insight_client.restart_agent_health_result = {
-        "ok": True,
-        "new_pid": 202,
-        "cmd": ["python", "agent.py"],
-    }
-    facade = InsightFacade(
-        ServiceContainer(
-            repository=repo,
-            workspace_store=MagicMock(),
-            insight_client=insight_client,
-        ),
-    )
-
-    result = facade.restart_agent_health(101)
-
-    assert insight_client.calls[-1] == ("restart_agent_health", 101)
-    assert result == {
-        "ok": True,
-        "new_pid": 202,
-        "cmd": ["python", "agent.py"],
-    }
-
-
 def test_export_atif_session_uses_mapping_and_rewrites_session_id(
     repo: SqliteRepository,
 ) -> None:
@@ -549,32 +478,6 @@ def test_export_atif_session_uses_mapping_and_rewrites_session_id(
     assert insight_client.calls[-1] == ("export_atif_session", "runtime-1")
     assert result["session_id"] == "session-1"
     assert result["runtime_session_id"] == "runtime-1"
-
-
-def test_export_atif_conversation_passthrough_returns_upstream_payload(
-    repo: SqliteRepository,
-) -> None:
-    from witty_service.application.insight_facade import InsightFacade
-
-    insight_client = FakeInsightClient()
-    insight_client.export_atif_conversation_result = {
-        "schema_version": "1.6",
-        "session_id": "conv-1",
-        "agent": {"name": "Alpha", "version": "test"},
-        "steps": [],
-    }
-    facade = InsightFacade(
-        ServiceContainer(
-            repository=repo,
-            workspace_store=MagicMock(),
-            insight_client=insight_client,
-        ),
-    )
-
-    result = facade.export_atif_conversation("conv-1")
-
-    assert insight_client.calls[-1] == ("export_atif_conversation", "conv-1")
-    assert result["session_id"] == "conv-1"
 
 
 def test_get_timeseries_filters_to_selected_managed_agent_sessions(

@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import MagicMock
 
 from fastapi.testclient import TestClient
+import pytest
 
 from witty_service.domain.errors import DomainError
 from witty_service.main import create_app
+
+AUTH_HEADERS = {"Authorization": "Bearer test-token"}
 
 
 def _client_with_facade(monkeypatch, facade: MagicMock) -> TestClient:
@@ -16,79 +20,83 @@ def _client_with_facade(monkeypatch, facade: MagicMock) -> TestClient:
     return TestClient(create_app(services=services))
 
 
-def test_get_insight_capabilities_returns_probe_result(monkeypatch) -> None:
-    facade = MagicMock()
-    facade.get_capabilities.return_value = {
-        "enabled": False,
-        "reachable": False,
-        "features": {
-            "sessions": False,
-            "timeseries": False,
-            "interruptions": False,
-            "health": False,
-        },
-    }
-    client = _client_with_facade(monkeypatch, facade)
-
-    resp = client.get(
-        "/insight/capabilities",
-        headers={"Authorization": "Bearer test-token"},
-    )
-
-    assert resp.status_code == 200
-    assert resp.json() == {
-        "enabled": False,
-        "reachable": False,
-        "features": {
-            "sessions": False,
-            "timeseries": False,
-            "interruptions": False,
-            "health": False,
-        },
+def _session_payload() -> dict[str, Any]:
+    return {
+        "session_id": "session-1",
+        "runtime_session_id": "runtime-1",
+        "witty_agent_id": "agent-1",
+        "witty_agent_name": "Alpha",
+        "agent_name": "Alpha",
+        "conversation_count": 1,
+        "first_seen_ns": 100,
+        "last_seen_ns": 200,
+        "total_input_tokens": 10,
+        "total_output_tokens": 5,
+        "model": "gpt-4o",
     }
 
 
-def test_get_insight_sessions_passes_managed_filters(monkeypatch) -> None:
-    facade = MagicMock()
-    facade.list_sessions.return_value = [
-        {
-            "session_id": "session-1",
-            "runtime_session_id": "runtime-1",
-            "witty_agent_id": "agent-1",
-            "witty_agent_name": "Alpha",
-            "agent_name": "Alpha",
-            "conversation_count": 1,
-            "first_seen_ns": 100,
-            "last_seen_ns": 200,
-            "total_input_tokens": 10,
-            "total_output_tokens": 5,
-            "model": "gpt-4o",
-        }
-    ]
-    client = _client_with_facade(monkeypatch, facade)
-
-    resp = client.get(
-        "/insight/sessions",
-        headers={"Authorization": "Bearer test-token"},
-        params={
-            "witty_agent_id": "agent-1",
-            "start_ns": 100,
-            "end_ns": 200,
-        },
-    )
-
-    assert resp.status_code == 200
-    assert resp.json()[0]["session_id"] == "session-1"
-    facade.list_sessions.assert_called_once_with(
-        witty_agent_id="agent-1",
-        start_ns=100,
-        end_ns=200,
-    )
+def _trace_summary_payload() -> dict[str, Any]:
+    return {
+        "trace_id": "trace-1",
+        "conversation_id": "conv-1",
+        "call_count": 2,
+        "total_input_tokens": 10,
+        "total_output_tokens": 5,
+        "start_ns": 100,
+        "end_ns": 200,
+        "model": "gpt-4o",
+        "user_query": "hello",
+    }
 
 
-def test_get_insight_timeseries_passes_buckets(monkeypatch) -> None:
-    facade = MagicMock()
-    facade.get_timeseries.return_value = {
+def _trace_detail_payload() -> dict[str, Any]:
+    return {
+        "id": 1,
+        "call_id": "call-1",
+        "start_timestamp_ns": 100,
+        "end_timestamp_ns": 200,
+        "model": "gpt-4o",
+        "input_tokens": 10,
+        "output_tokens": 5,
+        "total_tokens": 15,
+        "input_messages": "in",
+        "output_messages": "out",
+        "system_instructions": "sys",
+        "agent_name": "Alpha",
+        "process_name": "openclaw",
+        "pid": 123,
+        "user_query": "hello",
+        "event_json": "{}",
+        "trace_id": "trace-1",
+        "conversation_id": "conv-1",
+        "cache_read_tokens": 0,
+        "status": "ok",
+        "interruption_type": None,
+    }
+
+
+def _interruption_record_payload() -> dict[str, Any]:
+    return {
+        "id": 1,
+        "interruption_id": "interrupt-1",
+        "session_id": "session-1",
+        "runtime_session_id": "runtime-1",
+        "trace_id": "trace-1",
+        "conversation_id": "conv-1",
+        "call_id": "call-1",
+        "pid": 123,
+        "agent_name": "Alpha",
+        "interruption_type": "agent_crash",
+        "severity": "critical",
+        "occurred_at_ns": 100,
+        "detail": "crashed",
+        "resolved": False,
+    }
+
+
+def _timeseries_payload() -> dict[str, Any]:
+    return {
         "token_series": [
             {
                 "bucket_start_ns": 100,
@@ -105,247 +113,35 @@ def test_get_insight_timeseries_passes_buckets(monkeypatch) -> None:
             }
         ],
     }
-    client = _client_with_facade(monkeypatch, facade)
-
-    resp = client.get(
-        "/insight/timeseries",
-        headers={"Authorization": "Bearer test-token"},
-        params={
-            "witty_agent_id": "agent-1",
-            "start_ns": 100,
-            "end_ns": 200,
-            "buckets": 5,
-        },
-    )
-
-    assert resp.status_code == 200
-    assert resp.json()["token_series"][0]["total_tokens"] == 3
-    facade.get_timeseries.assert_called_once_with(
-        witty_agent_id="agent-1",
-        start_ns=100,
-        end_ns=200,
-        buckets=5,
-    )
 
 
-def test_get_session_traces_passes_path_and_query_params(monkeypatch) -> None:
-    facade = MagicMock()
-    facade.get_session_traces.return_value = [
-        {
-            "trace_id": "trace-1",
-            "conversation_id": "conv-1",
-            "call_count": 2,
-            "total_input_tokens": 10,
-            "total_output_tokens": 5,
-            "start_ns": 100,
-            "end_ns": 200,
-            "model": "gpt-4o",
-            "user_query": "hello",
-        }
-    ]
-    client = _client_with_facade(monkeypatch, facade)
-
-    resp = client.get(
-        "/insight/sessions/session-1/traces",
-        headers={"Authorization": "Bearer test-token"},
-        params={"start_ns": 100, "end_ns": 200},
-    )
-
-    assert resp.status_code == 200
-    assert resp.json()[0]["trace_id"] == "trace-1"
-    facade.get_session_traces.assert_called_once_with(
-        "session-1",
-        start_ns=100,
-        end_ns=200,
-    )
-
-
-def test_get_trace_detail_returns_list_payload(monkeypatch) -> None:
-    facade = MagicMock()
-    facade.get_trace_detail.return_value = [
-        {
-            "id": 1,
-            "call_id": "call-1",
-            "start_timestamp_ns": 100,
-            "end_timestamp_ns": 200,
-            "model": "gpt-4o",
-            "input_tokens": 10,
-            "output_tokens": 5,
-            "total_tokens": 15,
-            "input_messages": "in",
-            "output_messages": "out",
-            "system_instructions": "sys",
-            "agent_name": "Alpha",
-            "process_name": "openclaw",
-            "pid": 123,
-            "user_query": "hello",
-            "event_json": "{}",
-            "trace_id": "trace-1",
-            "conversation_id": "conv-1",
-            "cache_read_tokens": 0,
-            "status": "ok",
-            "interruption_type": None,
-        }
-    ]
-    client = _client_with_facade(monkeypatch, facade)
-
-    resp = client.get(
-        "/insight/traces/trace-1",
-        headers={"Authorization": "Bearer test-token"},
-    )
-
-    assert resp.status_code == 200
-    assert resp.json()[0]["id"] == 1
-    facade.get_trace_detail.assert_called_once_with("trace-1")
-
-
-def test_get_session_interruptions_returns_record_list(monkeypatch) -> None:
-    facade = MagicMock()
-    facade.get_session_interruptions.return_value = [
-        {
-            "id": 1,
-            "interruption_id": "interrupt-1",
-            "session_id": "session-1",
-            "runtime_session_id": "runtime-1",
-            "trace_id": "trace-1",
-            "conversation_id": "conv-1",
-            "call_id": "call-1",
-            "pid": 123,
-            "agent_name": "Alpha",
-            "interruption_type": "agent_crash",
-            "severity": "critical",
-            "occurred_at_ns": 100,
-            "detail": "crashed",
-            "resolved": False,
-        }
-    ]
-    client = _client_with_facade(monkeypatch, facade)
-
-    resp = client.get(
-        "/insight/sessions/session-1/interruptions",
-        headers={"Authorization": "Bearer test-token"},
-    )
-
-    assert resp.status_code == 200
-    assert resp.json()[0]["runtime_session_id"] == "runtime-1"
-    facade.get_session_interruptions.assert_called_once_with("session-1")
-
-
-def test_get_conversation_interruptions_returns_record_list(monkeypatch) -> None:
-    facade = MagicMock()
-    facade.get_conversation_interruptions.return_value = [
-        {
-            "id": 1,
-            "interruption_id": "interrupt-1",
-            "session_id": "session-1",
-            "runtime_session_id": "runtime-1",
-            "trace_id": "trace-1",
-            "conversation_id": "conv-1",
-            "call_id": "call-1",
-            "pid": 123,
-            "agent_name": "Alpha",
-            "interruption_type": "agent_crash",
-            "severity": "critical",
-            "occurred_at_ns": 100,
-            "detail": "crashed",
-            "resolved": False,
-        }
-    ]
-    client = _client_with_facade(monkeypatch, facade)
-
-    resp = client.get(
-        "/insight/conversations/conv-1/interruptions",
-        headers={"Authorization": "Bearer test-token"},
-    )
-
-    assert resp.status_code == 200
-    assert resp.json()[0]["conversation_id"] == "conv-1"
-    facade.get_conversation_interruptions.assert_called_once_with("conv-1")
-
-
-def test_resolve_interruption_returns_action_payload(monkeypatch) -> None:
-    facade = MagicMock()
-    facade.resolve_interruption.return_value = {"status": "resolved"}
-    client = _client_with_facade(monkeypatch, facade)
-
-    resp = client.post(
-        "/insight/interruptions/interrupt-1/resolve",
-        headers={"Authorization": "Bearer test-token"},
-    )
-
-    assert resp.status_code == 200
-    assert resp.json() == {"status": "resolved"}
-    facade.resolve_interruption.assert_called_once_with("interrupt-1")
-
-
-def test_get_interruption_session_counts_returns_schema_shape(monkeypatch) -> None:
-    facade = MagicMock()
-    facade.get_interruption_session_counts.return_value = [
-        {
-            "session_id": "session-1",
-            "runtime_session_id": "runtime-1",
-            "total": 2,
-            "by_severity": {"critical": 1, "high": 1, "medium": 0, "low": 0},
-            "types": [
-                {
-                    "interruption_type": "agent_crash",
-                    "severity": "critical",
-                    "count": 1,
-                }
-            ],
-        }
-    ]
-    client = _client_with_facade(monkeypatch, facade)
-
-    resp = client.get(
-        "/insight/interruptions/session-counts",
-        headers={"Authorization": "Bearer test-token"},
-    )
-
-    assert resp.status_code == 200
-    assert resp.json() == [
-        {
-            "session_id": "session-1",
-            "runtime_session_id": "runtime-1",
-            "total": 2,
-            "by_severity": {"critical": 1, "high": 1, "medium": 0, "low": 0},
-            "types": [
-                {
-                    "interruption_type": "agent_crash",
-                    "severity": "critical",
-                    "count": 1,
-                }
-            ],
-        }
-    ]
-
-
-def test_get_interruption_count_returns_count_payload(monkeypatch) -> None:
-    facade = MagicMock()
-    facade.get_interruption_count.return_value = {
+def _interruption_count_payload() -> dict[str, Any]:
+    return {
         "total": 2,
         "by_severity": {"critical": 1, "high": 1, "medium": 0, "low": 0},
     }
-    client = _client_with_facade(monkeypatch, facade)
-
-    resp = client.get(
-        "/insight/interruptions/count",
-        headers={"Authorization": "Bearer test-token"},
-        params={"witty_agent_id": "agent-1", "start_ns": 100, "end_ns": 200},
-    )
-
-    assert resp.status_code == 200
-    assert resp.json()["total"] == 2
-    facade.get_interruption_count.assert_called_once_with(
-        witty_agent_id="agent-1",
-        start_ns=100,
-        end_ns=200,
-    )
 
 
-def test_get_agent_health_returns_managed_and_orphan_runtimes(monkeypatch) -> None:
-    facade = MagicMock()
-    facade.get_agent_health.return_value = {
+def _interruption_session_counts_payload() -> list[dict[str, Any]]:
+    return [
+        {
+            "session_id": "session-1",
+            "runtime_session_id": "runtime-1",
+            "total": 2,
+            "by_severity": {"critical": 1, "high": 1, "medium": 0, "low": 0},
+            "types": [
+                {
+                    "interruption_type": "agent_crash",
+                    "severity": "critical",
+                    "count": 1,
+                }
+            ],
+        }
+    ]
+
+
+def _agent_health_payload() -> dict[str, Any]:
+    return {
         "agents": [
             {
                 "witty_agent_id": "agent-1",
@@ -393,91 +189,201 @@ def test_get_agent_health_returns_managed_and_orphan_runtimes(monkeypatch) -> No
         ],
         "last_scan_time": 999,
     }
-    client = _client_with_facade(monkeypatch, facade)
-
-    resp = client.get(
-        "/insight/agent-health",
-        headers={"Authorization": "Bearer test-token"},
-    )
-
-    assert resp.status_code == 200
-    assert resp.json()["last_scan_time"] == 999
-    assert resp.json()["orphan_runtimes"][0]["pid"] == 202
 
 
-def test_delete_agent_health_returns_action_payload(monkeypatch) -> None:
-    facade = MagicMock()
-    facade.delete_agent_health.return_value = {"ok": True}
-    client = _client_with_facade(monkeypatch, facade)
-
-    resp = client.delete(
-        "/insight/agent-health/101",
-        headers={"Authorization": "Bearer test-token"},
-    )
-
-    assert resp.status_code == 200
-    assert resp.json() == {"ok": True}
-    facade.delete_agent_health.assert_called_once_with(101)
-
-
-def test_restart_agent_health_returns_restart_payload(monkeypatch) -> None:
-    facade = MagicMock()
-    facade.restart_agent_health.return_value = {
-        "ok": True,
-        "new_pid": 202,
-        "cmd": ["python", "agent.py"],
-    }
-    client = _client_with_facade(monkeypatch, facade)
-
-    resp = client.post(
-        "/insight/agent-health/101/restart",
-        headers={"Authorization": "Bearer test-token"},
-    )
-
-    assert resp.status_code == 200
-    assert resp.json()["new_pid"] == 202
-    facade.restart_agent_health.assert_called_once_with(101)
-
-
-def test_export_atif_session_returns_document(monkeypatch) -> None:
-    facade = MagicMock()
-    facade.export_atif_session.return_value = {
+def _atif_session_payload() -> dict[str, Any]:
+    return {
         "schema_version": "1.6",
         "session_id": "session-1",
         "runtime_session_id": "runtime-1",
         "agent": {"name": "Alpha", "version": "test"},
         "steps": [{"step_id": 1, "source": "user", "message": "hello"}],
+        "final_metrics": None,
+        "extra": None,
     }
-    client = _client_with_facade(monkeypatch, facade)
-
-    resp = client.get(
-        "/insight/export/atif/session/session-1",
-        headers={"Authorization": "Bearer test-token"},
-    )
-
-    assert resp.status_code == 200
-    assert resp.json()["runtime_session_id"] == "runtime-1"
-    facade.export_atif_session.assert_called_once_with("session-1")
 
 
-def test_export_atif_conversation_returns_document(monkeypatch) -> None:
-    facade = MagicMock()
-    facade.export_atif_conversation.return_value = {
+def _atif_conversation_payload() -> dict[str, Any]:
+    return {
         "schema_version": "1.6",
         "session_id": "conv-1",
+        "runtime_session_id": None,
         "agent": {"name": "Alpha", "version": "test"},
         "steps": [{"step_id": 1, "source": "user", "message": "hello"}],
+        "final_metrics": None,
+        "extra": None,
     }
+
+
+@pytest.mark.parametrize(
+    ("request_method", "path", "params", "facade_method", "payload", "expected_args", "expected_kwargs"),
+    [
+        (
+            "get",
+            "/insight/capabilities",
+            None,
+            "get_capabilities",
+            {
+                "enabled": False,
+                "reachable": False,
+                "features": {
+                    "sessions": False,
+                    "timeseries": False,
+                    "interruptions": False,
+                    "health": False,
+                },
+            },
+            (),
+            {},
+        ),
+        (
+            "get",
+            "/insight/sessions",
+            {"witty_agent_id": "agent-1", "start_ns": 100, "end_ns": 200},
+            "list_sessions",
+            [_session_payload()],
+            (),
+            {"witty_agent_id": "agent-1", "start_ns": 100, "end_ns": 200},
+        ),
+        (
+            "get",
+            "/insight/timeseries",
+            {"witty_agent_id": "agent-1", "start_ns": 100, "end_ns": 200, "buckets": 5},
+            "get_timeseries",
+            _timeseries_payload(),
+            (),
+            {"witty_agent_id": "agent-1", "start_ns": 100, "end_ns": 200, "buckets": 5},
+        ),
+        (
+            "get",
+            "/insight/sessions/session-1/traces",
+            {"start_ns": 100, "end_ns": 200},
+            "get_session_traces",
+            [_trace_summary_payload()],
+            ("session-1",),
+            {"start_ns": 100, "end_ns": 200},
+        ),
+        (
+            "get",
+            "/insight/traces/trace-1",
+            None,
+            "get_trace_detail",
+            [_trace_detail_payload()],
+            ("trace-1",),
+            {},
+        ),
+        (
+            "get",
+            "/insight/sessions/session-1/interruptions",
+            None,
+            "get_session_interruptions",
+            [_interruption_record_payload()],
+            ("session-1",),
+            {},
+        ),
+        (
+            "get",
+            "/insight/conversations/conv-1/interruptions",
+            None,
+            "get_conversation_interruptions",
+            [_interruption_record_payload()],
+            ("conv-1",),
+            {},
+        ),
+        (
+            "post",
+            "/insight/interruptions/interrupt-1/resolve",
+            None,
+            "resolve_interruption",
+            {"status": "resolved"},
+            ("interrupt-1",),
+            {},
+        ),
+        (
+            "get",
+            "/insight/interruptions/session-counts",
+            None,
+            "get_interruption_session_counts",
+            _interruption_session_counts_payload(),
+            (),
+            {"witty_agent_id": None, "start_ns": None, "end_ns": None},
+        ),
+        (
+            "get",
+            "/insight/interruptions/count",
+            {"witty_agent_id": "agent-1", "start_ns": 100, "end_ns": 200},
+            "get_interruption_count",
+            _interruption_count_payload(),
+            (),
+            {"witty_agent_id": "agent-1", "start_ns": 100, "end_ns": 200},
+        ),
+        (
+            "get",
+            "/insight/agent-health",
+            None,
+            "get_agent_health",
+            _agent_health_payload(),
+            (),
+            {},
+        ),
+        (
+            "delete",
+            "/insight/agent-health/101",
+            None,
+            "delete_agent_health",
+            {"ok": True},
+            (101,),
+            {},
+        ),
+        (
+            "post",
+            "/insight/agent-health/101/restart",
+            None,
+            "restart_agent_health",
+            {"ok": True, "new_pid": 202, "cmd": ["python", "agent.py"]},
+            (101,),
+            {},
+        ),
+        (
+            "get",
+            "/insight/export/atif/session/session-1",
+            None,
+            "export_atif_session",
+            _atif_session_payload(),
+            ("session-1",),
+            {},
+        ),
+        (
+            "get",
+            "/insight/export/atif/conversation/conv-1",
+            None,
+            "export_atif_conversation",
+            _atif_conversation_payload(),
+            ("conv-1",),
+            {},
+        ),
+    ],
+)
+def test_insight_routes_return_facade_payloads(
+    monkeypatch,
+    request_method: str,
+    path: str,
+    params: dict[str, Any] | None,
+    facade_method: str,
+    payload: Any,
+    expected_args: tuple[Any, ...],
+    expected_kwargs: dict[str, Any],
+) -> None:
+    facade = MagicMock()
+    getattr(facade, facade_method).return_value = payload
     client = _client_with_facade(monkeypatch, facade)
 
-    resp = client.get(
-        "/insight/export/atif/conversation/conv-1",
-        headers={"Authorization": "Bearer test-token"},
-    )
+    request = getattr(client, request_method)
+    resp = request(path, headers=AUTH_HEADERS, params=params)
 
     assert resp.status_code == 200
-    assert resp.json()["session_id"] == "conv-1"
-    facade.export_atif_conversation.assert_called_once_with("conv-1")
+    assert resp.json() == payload
+    getattr(facade, facade_method).assert_called_once_with(*expected_args, **expected_kwargs)
 
 
 def test_domain_error_is_returned_in_standard_error_shape(monkeypatch) -> None:
@@ -492,7 +398,7 @@ def test_domain_error_is_returned_in_standard_error_shape(monkeypatch) -> None:
 
     resp = client.get(
         "/insight/sessions/missing/traces",
-        headers={"Authorization": "Bearer test-token"},
+        headers=AUTH_HEADERS,
     )
 
     assert resp.status_code == 404
