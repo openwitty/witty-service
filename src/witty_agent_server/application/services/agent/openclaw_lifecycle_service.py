@@ -369,7 +369,7 @@ class OpenClawLifecycleService:
             "--accept-risk",
             "--auth-choice",
             auth_choice,
-            "--{auth_choice}",
+            f"--{auth_choice}",
             api_key,
         ]
         if self._gateway_port:
