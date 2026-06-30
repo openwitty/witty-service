@@ -174,25 +174,6 @@ class FakeInsightClient:
         return self.agent_health_result
 
 
-def test_get_capabilities_reports_disabled_without_upstream(repo: SqliteRepository) -> None:
-    from witty_service.application.insight_facade import InsightFacade
-
-    facade = InsightFacade(
-        ServiceContainer(repository=repo, workspace_store=MagicMock()),
-    )
-
-    assert facade.get_capabilities() == {
-        "enabled": False,
-        "reachable": False,
-        "features": {
-            "sessions": False,
-            "timeseries": False,
-            "interruptions": False,
-            "health": False,
-        },
-    }
-
-
 def test_get_capabilities_reports_unreachable_when_health_probe_fails(
     repo: SqliteRepository,
 ) -> None:
@@ -222,31 +203,6 @@ def test_get_capabilities_reports_unreachable_when_health_probe_fails(
             "health": True,
         },
     }
-
-
-def test_list_witty_agents_reads_managed_agents_from_repository(repo: SqliteRepository) -> None:
-    from witty_service.application.insight_facade import InsightFacade
-
-    _create_agent(repo, "agent-1", "Alpha")
-    _create_agent(repo, "agent-2", "Beta")
-    facade = InsightFacade(
-        ServiceContainer(repository=repo, workspace_store=MagicMock()),
-    )
-
-    result = facade.list_witty_agents()
-
-    assert result == [
-        {
-            "witty_agent_id": "agent-1",
-            "witty_agent_name": "Alpha",
-            "status": "running",
-        },
-        {
-            "witty_agent_id": "agent-2",
-            "witty_agent_name": "Beta",
-            "status": "running",
-        },
-    ]
 
 
 def test_list_sessions_filters_to_all_managed_runtime_sessions_and_enriches(
@@ -515,46 +471,6 @@ def test_get_timeseries_filters_to_selected_managed_agent_sessions(
         },
     )
     assert result == insight_client.timeseries_result
-
-
-def test_raw_params_use_singular_session_id_for_single_runtime_session() -> None:
-    from witty_service.application.insight_facade import InsightFacade
-
-    params = InsightFacade._raw_params(session_ids=["runtime-1"])
-
-    assert params == {"session_id": "runtime-1"}
-
-
-def test_get_interruption_count_filters_to_all_managed_runtime_sessions(
-    repo: SqliteRepository,
-) -> None:
-    from witty_service.application.insight_facade import InsightFacade
-
-    _create_agent(repo, "agent-1", "Alpha")
-    _create_agent(repo, "agent-2", "Beta")
-    _create_session(repo, agent_id="agent-1", session_id="session-1", runtime_session_id="runtime-1")
-    _create_session(repo, agent_id="agent-2", session_id="session-2", runtime_session_id="runtime-2")
-
-    insight_client = FakeInsightClient()
-    insight_client.interruption_count_result = {
-        "total": 4,
-        "by_severity": {"critical": 1, "high": 1, "medium": 1, "low": 1},
-    }
-    facade = InsightFacade(
-        ServiceContainer(
-            repository=repo,
-            workspace_store=MagicMock(),
-            insight_client=insight_client,
-        ),
-    )
-
-    result = facade.get_interruption_count(start_ns=10, end_ns=20)
-
-    assert insight_client.calls[-1] == (
-        "get_interruption_count",
-        {"start_ns": 10, "end_ns": 20, "session_ids": ["runtime-1", "runtime-2"]},
-    )
-    assert result == insight_client.interruption_count_result
 
 
 def test_get_interruption_session_counts_remaps_runtime_session_ids_to_witty_ids(

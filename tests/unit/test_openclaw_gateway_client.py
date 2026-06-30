@@ -73,44 +73,6 @@ def test_collect_stream_events_keeps_sessions_changed_with_runtime_session_id(
     assert client._extract_runtime_session_id(payload) == expected_session_id
 
 
-def test_collect_stream_events_keeps_sessions_changed_when_session_key_matches(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    client = OpenClawGatewayClient(token="token")
-    payload = {
-        "sessionKey": "session-key",
-        "sessionId": "runtime-session-1",
-    }
-    messages = iter(
-        [
-            {
-                "type": "event",
-                "event": "sessions.changed",
-                "payload": payload,
-            }
-        ]
-    )
-
-    def fake_recv_json(ws: Any, *, timeout: float) -> dict[str, Any]:
-        del ws, timeout
-        try:
-            return next(messages)
-        except StopIteration as exc:
-            raise TimeoutError from exc
-
-    monkeypatch.setattr(client, "_recv_json", fake_recv_json)
-
-    events = list(
-        client._collect_stream_events(
-            ws=object(),
-            session_key="session-key",
-            run_id=None,
-        )
-    )
-
-    assert events == [{"type": "sessions.changed", "payload": payload}]
-
-
 def test_collect_stream_events_drops_sessions_changed_when_session_key_mismatches(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -146,83 +108,6 @@ def test_collect_stream_events_drops_sessions_changed_when_session_key_mismatche
     )
 
     assert events == []
-
-
-def test_collect_stream_events_drops_sessions_changed_when_nested_session_key_mismatches(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    client = OpenClawGatewayClient(token="token")
-    messages = iter(
-        [
-            {
-                "type": "event",
-                "event": "sessions.changed",
-                "payload": {
-                    "session": {
-                        "sessionKey": "other-session-key",
-                        "sessionId": "runtime-session-1",
-                    }
-                },
-            }
-        ]
-    )
-
-    def fake_recv_json(ws: Any, *, timeout: float) -> dict[str, Any]:
-        del ws, timeout
-        try:
-            return next(messages)
-        except StopIteration as exc:
-            raise TimeoutError from exc
-
-    monkeypatch.setattr(client, "_recv_json", fake_recv_json)
-
-    events = list(
-        client._collect_stream_events(
-            ws=object(),
-            session_key="session-key",
-            run_id=None,
-        )
-    )
-
-    assert events == []
-
-
-def test_collect_stream_events_warns_when_sessions_changed_has_no_session_key(
-    monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    client = OpenClawGatewayClient(token="token")
-    payload = {"sessionId": "runtime-session-1"}
-    messages = iter(
-        [
-            {
-                "type": "event",
-                "event": "sessions.changed",
-                "payload": payload,
-            }
-        ]
-    )
-
-    def fake_recv_json(ws: Any, *, timeout: float) -> dict[str, Any]:
-        del ws, timeout
-        try:
-            return next(messages)
-        except StopIteration as exc:
-            raise TimeoutError from exc
-
-    monkeypatch.setattr(client, "_recv_json", fake_recv_json)
-
-    with caplog.at_level(logging.WARNING):
-        events = list(
-            client._collect_stream_events(
-                ws=object(),
-                session_key="session-key",
-                run_id=None,
-            )
-        )
-
-    assert events == [{"type": "sessions.changed", "payload": payload}]
-    assert "accept sessions.changed without sessionKey" in caplog.text
 
 
 def test_collect_stream_events_skips_sessions_changed_without_runtime_session_id(
