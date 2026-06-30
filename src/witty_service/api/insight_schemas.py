@@ -78,6 +78,23 @@ class InsightConversationDetailResponse(InsightTraceDetailResponse):
     pass
 
 
+class InsightInterruptionRecordResponse(BaseModel):
+    id: int | None = None
+    interruption_id: str
+    session_id: str | None = None
+    runtime_session_id: str | None = None
+    trace_id: str | None = None
+    conversation_id: str | None = None
+    call_id: str | None = None
+    pid: int | None = None
+    agent_name: str | None = None
+    interruption_type: str
+    severity: str
+    occurred_at_ns: int
+    detail: str | None = None
+    resolved: bool
+
+
 class InsightTimeseriesBucketResponse(BaseModel):
     bucket_start_ns: int
     input_tokens: int
@@ -129,6 +146,29 @@ class InsightConversationInterruptionCountResponse(BaseModel):
     types: list[InsightInterruptionTypeStatResponse] = Field(default_factory=list)
 
 
+class InsightInterruptionResolveResponse(BaseModel):
+    status: str
+
+
+class InsightAgentHealthActionResponse(BaseModel):
+    ok: bool
+
+
+class InsightRestartAgentHealthResponse(InsightAgentHealthActionResponse):
+    new_pid: int
+    cmd: list[str] = Field(default_factory=list)
+
+
+class InsightAtifDocumentResponse(BaseModel):
+    schema_version: str
+    session_id: str
+    runtime_session_id: str | None = None
+    agent: dict[str, Any]
+    steps: list[dict[str, Any]] = Field(default_factory=list)
+    final_metrics: dict[str, Any] | None = None
+    extra: Any | None = None
+
+
 class InsightRuntimeHealthResponse(BaseModel):
     pid: int
     agent_name: str
@@ -171,4 +211,3 @@ class InsightAgentHealthResponse(BaseModel):
 InsightOrphanRuntimeHealthResponse = InsightRuntimeHealthResponse
 InsightTraceDetailListResponse = list[InsightTraceDetailResponse]
 InsightConversationDetailListResponse = list[InsightConversationDetailResponse]
-

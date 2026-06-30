@@ -156,14 +156,21 @@ curl -s http://127.0.0.1:8000/healthz
 | `/insight/witty-agents` | `GET` | 获取纳管的 Witty agent 列表 |
 | `/insight/sessions` | `GET` | 获取纳管 session 视图，支持按 `witty_agent_id` 过滤 |
 | `/insight/sessions/{session_id}/traces` | `GET` | 获取指定 Witty session 的 trace 列表 |
+| `/insight/sessions/{session_id}/interruptions` | `GET` | 获取指定 Witty session 的中断明细 |
 | `/insight/traces/{trace_id}` | `GET` | 获取指定 trace 的详情 |
 | `/insight/conversations/{conversation_id}` | `GET` | 获取指定 conversation 的详情 |
+| `/insight/conversations/{conversation_id}/interruptions` | `GET` | 获取指定 conversation 的中断明细 |
 | `/insight/timeseries` | `GET` | 获取纳管 session 的 token/model 时序聚合 |
 | `/insight/interruptions/count` | `GET` | 获取中断总数与严重级别分布 |
 | `/insight/interruptions/stats` | `GET` | 获取按中断类型聚合的统计结果 |
 | `/insight/interruptions/session-counts` | `GET` | 获取按 Witty session 聚合的中断统计 |
 | `/insight/interruptions/conversation-counts` | `GET` | 获取按 conversation 聚合的中断统计 |
+| `/insight/interruptions/{interruption_id}/resolve` | `POST` | 将指定中断标记为已处理 |
 | `/insight/agent-health` | `GET` | 获取纳管 agent 健康状态与孤立 runtime 诊断信息 |
+| `/insight/agent-health/{pid}` | `DELETE` | 确认并移除指定 raw runtime 健康记录 |
+| `/insight/agent-health/{pid}/restart` | `POST` | 请求重启指定 raw runtime 进程 |
+| `/insight/export/atif/session/{session_id}` | `GET` | 导出指定 Witty session 的 ATIF 文档 |
+| `/insight/export/atif/conversation/{conversation_id}` | `GET` | 导出指定 conversation 的 ATIF 文档 |
 
 说明：
 - `GET /agents/{agent_id}/sessions`

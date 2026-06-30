@@ -5,11 +5,16 @@ from fastapi import APIRouter, Depends, Request
 from witty_service.api.auth import require_bearer_auth
 from witty_service.api.insight_schemas import (
     InsightAgentHealthResponse,
+    InsightAgentHealthActionResponse,
+    InsightAtifDocumentResponse,
     InsightCapabilitiesResponse,
     InsightConversationDetailResponse,
     InsightConversationInterruptionCountResponse,
+    InsightInterruptionRecordResponse,
     InsightInterruptionCountResponse,
+    InsightInterruptionResolveResponse,
     InsightInterruptionTypeStatResponse,
+    InsightRestartAgentHealthResponse,
     InsightSessionInterruptionCountResponse,
     InsightSessionSummaryResponse,
     InsightTimeseriesResponse,
@@ -84,6 +89,20 @@ def get_session_traces(
     ]
 
 
+@router.get(
+    "/sessions/{session_id}/interruptions",
+    response_model=list[InsightInterruptionRecordResponse],
+)
+def get_session_interruptions(
+    session_id: str,
+    services: ServiceContainer = Depends(get_services),
+) -> list[InsightInterruptionRecordResponse]:
+    return [
+        InsightInterruptionRecordResponse.model_validate(item)
+        for item in services.get_insight_facade().get_session_interruptions(session_id)
+    ]
+
+
 @router.get("/traces/{trace_id}", response_model=list[InsightTraceDetailResponse])
 def get_trace_detail(
     trace_id: str,
@@ -106,6 +125,20 @@ def get_conversation_detail(
     return [
         InsightConversationDetailResponse.model_validate(item)
         for item in services.get_insight_facade().get_conversation_detail(conversation_id)
+    ]
+
+
+@router.get(
+    "/conversations/{conversation_id}/interruptions",
+    response_model=list[InsightInterruptionRecordResponse],
+)
+def get_conversation_interruptions(
+    conversation_id: str,
+    services: ServiceContainer = Depends(get_services),
+) -> list[InsightInterruptionRecordResponse]:
+    return [
+        InsightInterruptionRecordResponse.model_validate(item)
+        for item in services.get_insight_facade().get_conversation_interruptions(conversation_id)
     ]
 
 
@@ -200,10 +233,69 @@ def get_interruption_conversation_counts(
     ]
 
 
+@router.post(
+    "/interruptions/{interruption_id}/resolve",
+    response_model=InsightInterruptionResolveResponse,
+)
+def resolve_interruption(
+    interruption_id: str,
+    services: ServiceContainer = Depends(get_services),
+) -> InsightInterruptionResolveResponse:
+    return InsightInterruptionResolveResponse.model_validate(
+        services.get_insight_facade().resolve_interruption(interruption_id)
+    )
+
+
 @router.get("/agent-health", response_model=InsightAgentHealthResponse)
 def get_agent_health(
     services: ServiceContainer = Depends(get_services),
 ) -> InsightAgentHealthResponse:
     return InsightAgentHealthResponse.model_validate(
         services.get_insight_facade().get_agent_health()
+    )
+
+
+@router.delete("/agent-health/{pid}", response_model=InsightAgentHealthActionResponse)
+def delete_agent_health(
+    pid: int,
+    services: ServiceContainer = Depends(get_services),
+) -> InsightAgentHealthActionResponse:
+    return InsightAgentHealthActionResponse.model_validate(
+        services.get_insight_facade().delete_agent_health(pid)
+    )
+
+
+@router.post("/agent-health/{pid}/restart", response_model=InsightRestartAgentHealthResponse)
+def restart_agent_health(
+    pid: int,
+    services: ServiceContainer = Depends(get_services),
+) -> InsightRestartAgentHealthResponse:
+    return InsightRestartAgentHealthResponse.model_validate(
+        services.get_insight_facade().restart_agent_health(pid)
+    )
+
+
+@router.get(
+    "/export/atif/session/{session_id}",
+    response_model=InsightAtifDocumentResponse,
+)
+def export_atif_session(
+    session_id: str,
+    services: ServiceContainer = Depends(get_services),
+) -> InsightAtifDocumentResponse:
+    return InsightAtifDocumentResponse.model_validate(
+        services.get_insight_facade().export_atif_session(session_id)
+    )
+
+
+@router.get(
+    "/export/atif/conversation/{conversation_id}",
+    response_model=InsightAtifDocumentResponse,
+)
+def export_atif_conversation(
+    conversation_id: str,
+    services: ServiceContainer = Depends(get_services),
+) -> InsightAtifDocumentResponse:
+    return InsightAtifDocumentResponse.model_validate(
+        services.get_insight_facade().export_atif_conversation(conversation_id)
     )

@@ -104,6 +104,12 @@ class InsightClient:
     def get_agent_health(self) -> Any:
         return self._request_json("GET", "/api/agent-health")
 
+    def delete_agent_health(self, pid: int) -> Any:
+        return self._request_json("DELETE", f"/api/agent-health/{pid}")
+
+    def restart_agent_health(self, pid: int) -> Any:
+        return self._request_json("POST", f"/api/agent-health/{pid}/restart")
+
     def get_interruption_count(self, params: dict[str, Any] | None = None) -> Any:
         return self._request_json("GET", "/api/interruptions/count", params=params)
 
@@ -118,3 +124,18 @@ class InsightClient:
         params: dict[str, Any] | None = None,
     ) -> Any:
         return self._request_json("GET", "/api/interruptions/conversation-counts", params=params)
+
+    def get_session_interruptions(self, session_id: str) -> Any:
+        return self._request_json("GET", f"/api/sessions/{session_id}/interruptions")
+
+    def get_conversation_interruptions(self, conversation_id: str) -> Any:
+        return self._request_json("GET", f"/api/conversations/{conversation_id}/interruptions")
+
+    def resolve_interruption(self, interruption_id: str) -> Any:
+        return self._request_json("POST", f"/api/interruptions/{interruption_id}/resolve")
+
+    def export_atif_session(self, session_id: str) -> Any:
+        return self._request_json("GET", f"/api/export/atif/session/{session_id}")
+
+    def export_atif_conversation(self, conversation_id: str) -> Any:
+        return self._request_json("GET", f"/api/export/atif/conversation/{conversation_id}")

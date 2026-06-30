@@ -199,6 +199,85 @@ def test_get_trace_detail_returns_list_payload(monkeypatch) -> None:
     facade.get_trace_detail.assert_called_once_with("trace-1")
 
 
+def test_get_session_interruptions_returns_record_list(monkeypatch) -> None:
+    facade = MagicMock()
+    facade.get_session_interruptions.return_value = [
+        {
+            "id": 1,
+            "interruption_id": "interrupt-1",
+            "session_id": "session-1",
+            "runtime_session_id": "runtime-1",
+            "trace_id": "trace-1",
+            "conversation_id": "conv-1",
+            "call_id": "call-1",
+            "pid": 123,
+            "agent_name": "Alpha",
+            "interruption_type": "agent_crash",
+            "severity": "critical",
+            "occurred_at_ns": 100,
+            "detail": "crashed",
+            "resolved": False,
+        }
+    ]
+    client = _client_with_facade(monkeypatch, facade)
+
+    resp = client.get(
+        "/insight/sessions/session-1/interruptions",
+        headers={"Authorization": "Bearer test-token"},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()[0]["runtime_session_id"] == "runtime-1"
+    facade.get_session_interruptions.assert_called_once_with("session-1")
+
+
+def test_get_conversation_interruptions_returns_record_list(monkeypatch) -> None:
+    facade = MagicMock()
+    facade.get_conversation_interruptions.return_value = [
+        {
+            "id": 1,
+            "interruption_id": "interrupt-1",
+            "session_id": "session-1",
+            "runtime_session_id": "runtime-1",
+            "trace_id": "trace-1",
+            "conversation_id": "conv-1",
+            "call_id": "call-1",
+            "pid": 123,
+            "agent_name": "Alpha",
+            "interruption_type": "agent_crash",
+            "severity": "critical",
+            "occurred_at_ns": 100,
+            "detail": "crashed",
+            "resolved": False,
+        }
+    ]
+    client = _client_with_facade(monkeypatch, facade)
+
+    resp = client.get(
+        "/insight/conversations/conv-1/interruptions",
+        headers={"Authorization": "Bearer test-token"},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()[0]["conversation_id"] == "conv-1"
+    facade.get_conversation_interruptions.assert_called_once_with("conv-1")
+
+
+def test_resolve_interruption_returns_action_payload(monkeypatch) -> None:
+    facade = MagicMock()
+    facade.resolve_interruption.return_value = {"status": "resolved"}
+    client = _client_with_facade(monkeypatch, facade)
+
+    resp = client.post(
+        "/insight/interruptions/interrupt-1/resolve",
+        headers={"Authorization": "Bearer test-token"},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json() == {"status": "resolved"}
+    facade.resolve_interruption.assert_called_once_with("interrupt-1")
+
+
 def test_get_interruption_session_counts_returns_schema_shape(monkeypatch) -> None:
     facade = MagicMock()
     facade.get_interruption_session_counts.return_value = [
@@ -324,6 +403,81 @@ def test_get_agent_health_returns_managed_and_orphan_runtimes(monkeypatch) -> No
     assert resp.status_code == 200
     assert resp.json()["last_scan_time"] == 999
     assert resp.json()["orphan_runtimes"][0]["pid"] == 202
+
+
+def test_delete_agent_health_returns_action_payload(monkeypatch) -> None:
+    facade = MagicMock()
+    facade.delete_agent_health.return_value = {"ok": True}
+    client = _client_with_facade(monkeypatch, facade)
+
+    resp = client.delete(
+        "/insight/agent-health/101",
+        headers={"Authorization": "Bearer test-token"},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json() == {"ok": True}
+    facade.delete_agent_health.assert_called_once_with(101)
+
+
+def test_restart_agent_health_returns_restart_payload(monkeypatch) -> None:
+    facade = MagicMock()
+    facade.restart_agent_health.return_value = {
+        "ok": True,
+        "new_pid": 202,
+        "cmd": ["python", "agent.py"],
+    }
+    client = _client_with_facade(monkeypatch, facade)
+
+    resp = client.post(
+        "/insight/agent-health/101/restart",
+        headers={"Authorization": "Bearer test-token"},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["new_pid"] == 202
+    facade.restart_agent_health.assert_called_once_with(101)
+
+
+def test_export_atif_session_returns_document(monkeypatch) -> None:
+    facade = MagicMock()
+    facade.export_atif_session.return_value = {
+        "schema_version": "1.6",
+        "session_id": "session-1",
+        "runtime_session_id": "runtime-1",
+        "agent": {"name": "Alpha", "version": "test"},
+        "steps": [{"step_id": 1, "source": "user", "message": "hello"}],
+    }
+    client = _client_with_facade(monkeypatch, facade)
+
+    resp = client.get(
+        "/insight/export/atif/session/session-1",
+        headers={"Authorization": "Bearer test-token"},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["runtime_session_id"] == "runtime-1"
+    facade.export_atif_session.assert_called_once_with("session-1")
+
+
+def test_export_atif_conversation_returns_document(monkeypatch) -> None:
+    facade = MagicMock()
+    facade.export_atif_conversation.return_value = {
+        "schema_version": "1.6",
+        "session_id": "conv-1",
+        "agent": {"name": "Alpha", "version": "test"},
+        "steps": [{"step_id": 1, "source": "user", "message": "hello"}],
+    }
+    client = _client_with_facade(monkeypatch, facade)
+
+    resp = client.get(
+        "/insight/export/atif/conversation/conv-1",
+        headers={"Authorization": "Bearer test-token"},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["session_id"] == "conv-1"
+    facade.export_atif_conversation.assert_called_once_with("conv-1")
 
 
 def test_domain_error_is_returned_in_standard_error_shape(monkeypatch) -> None:

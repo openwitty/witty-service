@@ -129,27 +129,36 @@ class InsightFacade:
         start_ns: int | None = None,
         end_ns: int | None = None,
     ) -> Any:
-        session = self._repository.get_session(witty_session_id)
-        if (
-            session is None
-            or session.runtime_type != _RUNTIME_TYPE
-            or not session.runtime_session_id
-        ):
-            raise insight_session_mapping_not_found(
-                session_id=witty_session_id,
-                runtime_type=None if session is None else session.runtime_type,
-                runtime_session_id=None if session is None else session.runtime_session_id,
-            )
+        session = self._require_runtime_session(witty_session_id)
         return self._services.get_insight_client().get_session_traces(
             session.runtime_session_id,
             self._raw_params(start_ns=start_ns, end_ns=end_ns),
         )
+
+    def get_session_interruptions(self, witty_session_id: str) -> list[dict[str, Any]]:
+        session = self._require_runtime_session(witty_session_id)
+        result = self._services.get_insight_client().get_session_interruptions(
+            session.runtime_session_id,
+        )
+        if not isinstance(result, list):
+            return []
+        return self._remap_interruption_records(result)
+
+    def get_conversation_interruptions(self, conversation_id: str) -> list[dict[str, Any]]:
+        result = self._services.get_insight_client().get_conversation_interruptions(conversation_id)
+        if not isinstance(result, list):
+            return []
+        return self._remap_interruption_records(result)
 
     def get_trace_detail(self, trace_id: str) -> Any:
         return self._services.get_insight_client().get_trace_detail(trace_id)
 
     def get_conversation_detail(self, conversation_id: str) -> Any:
         return self._services.get_insight_client().get_conversation_detail(conversation_id)
+
+    def resolve_interruption(self, interruption_id: str) -> dict[str, Any]:
+        result = self._services.get_insight_client().resolve_interruption(interruption_id)
+        return result if isinstance(result, dict) else {"status": "resolved"}
 
     def get_timeseries(
         self,
@@ -280,6 +289,28 @@ class InsightFacade:
         )
         return result if isinstance(result, list) else []
 
+    def delete_agent_health(self, pid: int) -> dict[str, Any]:
+        result = self._services.get_insight_client().delete_agent_health(pid)
+        return result if isinstance(result, dict) else {"ok": True}
+
+    def restart_agent_health(self, pid: int) -> dict[str, Any]:
+        result = self._services.get_insight_client().restart_agent_health(pid)
+        return result if isinstance(result, dict) else {"ok": True, "new_pid": 0, "cmd": []}
+
+    def export_atif_session(self, witty_session_id: str) -> dict[str, Any]:
+        session = self._require_runtime_session(witty_session_id)
+        result = self._services.get_insight_client().export_atif_session(session.runtime_session_id)
+        if not isinstance(result, dict):
+            return {}
+        document = dict(result)
+        document["session_id"] = session.id
+        document["runtime_session_id"] = session.runtime_session_id
+        return document
+
+    def export_atif_conversation(self, conversation_id: str) -> dict[str, Any]:
+        result = self._services.get_insight_client().export_atif_conversation(conversation_id)
+        return result if isinstance(result, dict) else {}
+
     def get_agent_health(self) -> dict[str, Any]:
         raw_result = self._services.get_insight_client().get_agent_health()
         raw_agents = raw_result.get("agents") if isinstance(raw_result, dict) else []
@@ -341,6 +372,49 @@ class InsightFacade:
         if session_ids:
             params["session_ids"] = session_ids
         return params
+
+    def _require_runtime_session(self, witty_session_id: str) -> SessionRecord:
+        session = self._repository.get_session(witty_session_id)
+        if (
+            session is None
+            or session.runtime_type != _RUNTIME_TYPE
+            or not session.runtime_session_id
+        ):
+            raise insight_session_mapping_not_found(
+                session_id=witty_session_id,
+                runtime_type=None if session is None else session.runtime_type,
+                runtime_session_id=None if session is None else session.runtime_session_id,
+            )
+        return session
+
+    def _remap_interruption_records(self, records: list[Any]) -> list[dict[str, Any]]:
+        runtime_session_ids = [
+            item.get("session_id")
+            for item in records
+            if isinstance(item, dict) and isinstance(item.get("session_id"), str)
+        ]
+        sessions_by_runtime_id = {
+            session.runtime_session_id: session
+            for session in self._repository.list_sessions_by_runtime_session_ids(
+                _RUNTIME_TYPE,
+                runtime_session_ids,
+            )
+            if session.runtime_session_id is not None
+        }
+
+        remapped: list[dict[str, Any]] = []
+        for item in records:
+            if not isinstance(item, dict):
+                continue
+            payload = dict(item)
+            runtime_session_id = payload.get("session_id")
+            if isinstance(runtime_session_id, str):
+                session = sessions_by_runtime_id.get(runtime_session_id)
+                if session is not None:
+                    payload["session_id"] = session.id
+                    payload["runtime_session_id"] = runtime_session_id
+            remapped.append(payload)
+        return remapped
 
     def _list_managed_runtime_session_ids(
         self,

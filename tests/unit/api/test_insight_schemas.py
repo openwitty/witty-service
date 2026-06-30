@@ -2,12 +2,17 @@ from __future__ import annotations
 
 from witty_service.api.insight_schemas import (
     InsightAgentHealthResponse,
+    InsightAgentHealthActionResponse,
+    InsightAtifDocumentResponse,
     InsightCapabilitiesResponse,
     InsightConversationInterruptionCountResponse,
     InsightInterruptionCountResponse,
+    InsightInterruptionRecordResponse,
+    InsightInterruptionResolveResponse,
     InsightInterruptionTypeStatResponse,
     InsightManagedAgentHealthResponse,
     InsightModelTimeseriesBucketResponse,
+    InsightRestartAgentHealthResponse,
     InsightSessionInterruptionCountResponse,
     InsightSessionSummaryResponse,
     InsightTimeseriesBucketResponse,
@@ -314,3 +319,57 @@ def test_health_payload_validates_managed_and_orphan_runtimes() -> None:
     ]
     assert response.orphan_runtimes[0].pid == 202
 
+
+def test_interruption_record_and_actions_validate() -> None:
+    record = InsightInterruptionRecordResponse.model_validate(
+        {
+            "id": 1,
+            "interruption_id": "interrupt-1",
+            "session_id": "session-1",
+            "runtime_session_id": "runtime-1",
+            "trace_id": "trace-1",
+            "conversation_id": "conv-1",
+            "call_id": "call-1",
+            "pid": 123,
+            "agent_name": "Alpha",
+            "interruption_type": "agent_crash",
+            "severity": "critical",
+            "occurred_at_ns": 100,
+            "detail": "crashed",
+            "resolved": False,
+        }
+    )
+    resolve = InsightInterruptionResolveResponse.model_validate({"status": "resolved"})
+    deleted = InsightAgentHealthActionResponse.model_validate({"ok": True})
+    restarted = InsightRestartAgentHealthResponse.model_validate(
+        {"ok": True, "new_pid": 202, "cmd": ["python", "agent.py"]}
+    )
+
+    assert record.runtime_session_id == "runtime-1"
+    assert resolve.status == "resolved"
+    assert deleted.ok is True
+    assert restarted.cmd == ["python", "agent.py"]
+
+
+def test_atif_document_validates_top_level_shape() -> None:
+    document = InsightAtifDocumentResponse.model_validate(
+        {
+            "schema_version": "1.6",
+            "session_id": "session-1",
+            "runtime_session_id": "runtime-1",
+            "agent": {"name": "Alpha", "version": "test"},
+            "steps": [
+                {
+                    "step_id": 1,
+                    "source": "user",
+                    "message": "hello",
+                }
+            ],
+            "final_metrics": {"total_steps": 1},
+        }
+    )
+
+    assert document.session_id == "session-1"
+    assert document.runtime_session_id == "runtime-1"
+    assert document.agent["name"] == "Alpha"
+    assert document.steps[0]["step_id"] == 1
