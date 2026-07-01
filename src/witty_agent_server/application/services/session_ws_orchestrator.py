@@ -23,6 +23,7 @@ from witty_agent_server.runtimes.runtime_base import (
     supports_runtime_lifecycle,
     supports_runtime_turn,
 )
+from witty_service.config import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -51,11 +52,13 @@ class SessionWSOrchestrator:
         agent_service: AgentService,
         identity_store: SessionIdentityStore | None = None,
         state_sync_service: SessionStateSyncService | None = None,
+        runtime_type: RuntimeType,
     ) -> None:
         self._session_service = session_service
         self._agent_service = agent_service
         self._identity_store = identity_store or SessionIdentityStore()
         self._state_sync_service = state_sync_service or SessionStateSyncService()
+        self._runtime_type = runtime_type
 
     def stream_message(
         self, *, agent_id: str, session_id: str, message: str
@@ -139,35 +142,35 @@ class SessionWSOrchestrator:
             )
 
     def abort_turn(self, *, agent_id: str, session_id: str) -> None:
- 	    session = self._require_session(agent_id=agent_id, session_id=session_id)
- 	    runtime_type = cast(RuntimeType, session.get("runtime_type"))
- 	    runtime = self._require_runtime(runtime_type)
- 	    if runtime is not None and supports_runtime_lifecycle(runtime):
- 	        runtime_session_key = session.get("runtime_session_key")
- 	        if isinstance(runtime_session_key, str) and runtime_session_key:
- 	            logger.info(
- 	                "abort runtime turn: agent_id=%s session_id=%s runtime_type=%s session_key=%s",
- 	                agent_id,
- 	                session_id,
- 	                runtime_type,
- 	                runtime_session_key,
- 	            )
- 	            try:
- 	                runtime.abort_session(session_key=runtime_session_key)
- 	            except Exception:
- 	                logger.exception(
- 	                    "abort runtime turn failed: agent_id=%s session_id=%s",
- 	                    agent_id,
- 	                    session_id,
- 	                )
- 	    # 中断会话后上报状态为 idle。
- 	    self._state_sync_service.emit_state_changed(
- 	        agent_id=agent_id,
- 	        session_id=session_id,
- 	        runtime_type=runtime_type,
- 	        state="idle",
- 	        reason="message.abort",
-	    )
+         session = self._require_session(agent_id=agent_id, session_id=session_id)
+         runtime_type = cast(RuntimeType, session.get("runtime_type"))
+         runtime = self._require_runtime(runtime_type)
+         if runtime is not None and supports_runtime_lifecycle(runtime):
+             runtime_session_key = session.get("runtime_session_key")
+             if isinstance(runtime_session_key, str) and runtime_session_key:
+                 logger.info(
+                     "abort runtime turn: agent_id=%s session_id=%s runtime_type=%s session_key=%s",
+                     agent_id,
+                     session_id,
+                     runtime_type,
+                     runtime_session_key,
+                 )
+                 try:
+                     runtime.abort_session(session_key=runtime_session_key)
+                 except Exception:
+                     logger.exception(
+                         "abort runtime turn failed: agent_id=%s session_id=%s",
+                         agent_id,
+                         session_id,
+                     )
+         # 中断会话后上报状态为 idle。
+         self._state_sync_service.emit_state_changed(
+             agent_id=agent_id,
+             session_id=session_id,
+             runtime_type=runtime_type,
+             state="idle",
+             reason="message.abort",
+        )
 
     def precheck_message(self, *, agent_id: str, session_id: str, message: str) -> None:
         if not isinstance(message, str) or not message.strip():
@@ -180,7 +183,7 @@ class SessionWSOrchestrator:
         self._require_running_agent()
         session = self._require_session(agent_id=agent_id, session_id=session_id)
         runtime_type = session.get("runtime_type")
-        if runtime_type not in ("openclaw", "opencode"):
+        if not self._is_supported_runtime(runtime_type):
             raise SessionWSOrchestratorError(
                 code="RUNTIME_UNAVAILABLE",
                 message="runtime unavailable",
@@ -366,6 +369,11 @@ class SessionWSOrchestrator:
                 status_code=503,
             )
         return runtime
+
+    def _is_supported_runtime(self, runtime_type: object) -> bool:
+        """判断 runtime_type 是否在 settings.runtime.supported 中。"""
+        settings = get_settings()
+        return isinstance(runtime_type, str) and runtime_type in settings.runtime.supported
 
     def _require_running_agent(self) -> None:
         if self._agent_service.agent.status != AgentStatus.RUNNING:

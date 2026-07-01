@@ -3,7 +3,9 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any
 
-from witty_agent_server.infra.ws.openclaw_gateway_client import OpenClawGatewayClient
+from witty_agent_server.application.services.skill.skill_client_port import (
+    SkillClientPort,
+)
 
 
 class AgentSkillServiceBase(ABC):
@@ -12,9 +14,9 @@ class AgentSkillServiceBase(ABC):
     def __init__(
         self,
         *,
-        openclaw_client: OpenClawGatewayClient | None = None,
+        skill_client: SkillClientPort | None = None,
     ) -> None:
-        self._openclaw_client = openclaw_client or OpenClawGatewayClient()
+        self._skill_client = skill_client
 
     @abstractmethod
     def list_skills(self, *, agent_id: str | None = None) -> dict[str, Any]:

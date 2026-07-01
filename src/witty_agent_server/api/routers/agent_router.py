@@ -14,12 +14,6 @@ from witty_agent_server.application.services.skill.base import AgentSkillService
 from witty_agent_server.application.services.skill.errors import (
     AgentSkillServiceError,
 )
-from witty_agent_server.application.services.skill.openclaw_skill_service import (
-    OpenClawSkillService,
-)
-from witty_agent_server.application.services.skill.opencode_skill_service import (
-    OpenCodeSkillService,
-)
 
 
 logger = logging.getLogger(__name__)
@@ -38,12 +32,10 @@ class UninstallSkillRequest(BaseModel):
 
 def create_agent_router(
     agent_service: AgentService,
-    openclaw_skill_service: OpenClawSkillService | None = None,
-    opencode_skill_service: OpenCodeSkillService | None = None,
+    *,
+    skill_service: AgentSkillServiceBase,
 ) -> APIRouter:
     router = APIRouter(prefix="/agent")
-    resolved_openclaw_skill_service = openclaw_skill_service or OpenClawSkillService()
-    resolved_opencode_skill_service = opencode_skill_service or OpenCodeSkillService()
 
     @router.post("/start", response_model=None)
     async def start_agent(
@@ -124,12 +116,7 @@ def create_agent_router(
             agent.status,
         )
         try:
-            resolved_skill_service = _resolve_skill_service(
-                runtime_type=agent.runtime_type,
-                openclaw_skill_service=resolved_openclaw_skill_service,
-                opencode_skill_service=resolved_opencode_skill_service,
-            )
-            return resolved_skill_service.list_skills(agent_id=agent.id)
+            return skill_service.list_skills(agent_id=agent.id)
         except AgentSkillServiceError as exc:
             logger.warning(
                 "get_agent_skills failed, runtime_type=%s code=%s",
@@ -159,12 +146,7 @@ def create_agent_router(
             payload.skill_name,
         )
         try:
-            resolved_skill_service = _resolve_skill_service(
-                runtime_type=agent.runtime_type,
-                openclaw_skill_service=resolved_openclaw_skill_service,
-                opencode_skill_service=resolved_opencode_skill_service,
-            )
-            install_result = resolved_skill_service.install_skill(
+            install_result = skill_service.install_skill(
                 agent_id=agent.id,
                 skill_name=payload.skill_name,
                 source_path=payload.source_path,
@@ -220,12 +202,7 @@ def create_agent_router(
             payload.skill_name,
         )
         try:
-            resolved_skill_service = _resolve_skill_service(
-                runtime_type=agent.runtime_type,
-                openclaw_skill_service=resolved_openclaw_skill_service,
-                opencode_skill_service=resolved_opencode_skill_service,
-            )
-            uninstall_result = resolved_skill_service.uninstall_skill(
+            uninstall_result = skill_service.uninstall_skill(
                 agent_id=agent.id,
                 skill_name=payload.skill_name,
                 source_type=payload.source_type,
@@ -388,24 +365,6 @@ def _map_agent_skill_error(
         code=exc.code,
         message=exc.message,
         details=exc.details,
-    )
-
-
-def _resolve_skill_service(
-    *,
-    runtime_type: str,
-    openclaw_skill_service: OpenClawSkillService,
-    opencode_skill_service: OpenCodeSkillService,
-) -> AgentSkillServiceBase:
-    if runtime_type == "openclaw":
-        return openclaw_skill_service
-    if runtime_type == "opencode":
-        return opencode_skill_service
-    raise AgentSkillServiceError(
-        code="RUNTIME_SKILLS_NOT_SUPPORTED",
-        message="runtime skills query is not supported",
-        status_code=501,
-        details={"runtime_type": runtime_type},
     )
 
 

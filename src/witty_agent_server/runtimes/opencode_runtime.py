@@ -1,4 +1,5 @@
 from collections.abc import Iterator
+from typing import Any
 
 from witty_agent_server.runtimes.runtime_base import (
     RuntimeBase,
@@ -11,6 +12,10 @@ from witty_agent_server.runtimes.runtime_base import (
 
 class OpenCodeRuntime(RuntimeBase):
     runtime_type: RuntimeType = "opencode"
+
+    def list_sessions(self, *, agent_id: str) -> list[dict[str, Any]]:
+        del agent_id
+        raise NotImplementedError("opencode runtime is not implemented yet")
 
     def create_session(self, *, session_key: str) -> None:
         del session_key
