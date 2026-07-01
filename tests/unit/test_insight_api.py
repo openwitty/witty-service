@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
-from fastapi.testclient import TestClient
 import pytest
+from fastapi.testclient import TestClient
 
 from witty_service.domain.errors import DomainError
 from witty_service.main import create_app
@@ -17,6 +17,9 @@ def _client_with_facade(monkeypatch, facade: MagicMock) -> TestClient:
     services = MagicMock()
     services.get_insight_facade.return_value = facade
     services.repository = MagicMock()
+    services.repository.find_stale_generating_messages.return_value = []
+    services.repository.list_agents_needing_recovery.return_value = []
+    services.close = AsyncMock()
     return TestClient(create_app(services=services))
 
 
@@ -375,7 +378,8 @@ def test_insight_routes_return_facade_payloads(
     expected_kwargs: dict[str, Any],
 ) -> None:
     facade = MagicMock()
-    getattr(facade, facade_method).return_value = payload
+    mocked_method = AsyncMock(return_value=payload)
+    setattr(facade, facade_method, mocked_method)
     client = _client_with_facade(monkeypatch, facade)
 
     request = getattr(client, request_method)
@@ -383,16 +387,18 @@ def test_insight_routes_return_facade_payloads(
 
     assert resp.status_code == 200
     assert resp.json() == payload
-    getattr(facade, facade_method).assert_called_once_with(*expected_args, **expected_kwargs)
+    mocked_method.assert_awaited_once_with(*expected_args, **expected_kwargs)
 
 
 def test_domain_error_is_returned_in_standard_error_shape(monkeypatch) -> None:
     facade = MagicMock()
-    facade.get_session_traces.side_effect = DomainError(
-        code="INSIGHT_SESSION_MAPPING_NOT_FOUND",
-        message="witty session is not mapped to a runtime insight session",
-        status_code=404,
-        details={"session_id": "missing"},
+    facade.get_session_traces = AsyncMock(
+        side_effect=DomainError(
+            code="INSIGHT_SESSION_MAPPING_NOT_FOUND",
+            message="witty session is not mapped to a runtime insight session",
+            status_code=404,
+            details={"session_id": "missing"},
+        )
     )
     client = _client_with_facade(monkeypatch, facade)
 

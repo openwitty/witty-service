@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from witty_service.api import services as services_module
 from witty_service.api.services import ServiceContainer
-from witty_service.adapter.insight_client import InsightClient
+from witty_service.adapter.http_client import AdaptorHttpClient
 from witty_service.domain.errors import DomainError
 
 
@@ -74,22 +74,22 @@ def test_get_agent_manager_for_agent_uses_agent_sandbox(monkeypatch) -> None:
     assert manager._sandbox_backend is backend
 
 
-def test_get_insight_client_returns_injected_client() -> None:
-    insight_client = MagicMock(spec=InsightClient)
+def test_get_insight_http_client_returns_injected_client() -> None:
+    insight_http_client = MagicMock(spec=AdaptorHttpClient)
     container = ServiceContainer(
         repository=MagicMock(),
         workspace_store=MagicMock(),
-        insight_client=insight_client,
+        insight_http_client=insight_http_client,
     )
 
-    assert container.get_insight_client() is insight_client
+    assert container.get_insight_http_client() is insight_http_client
 
 
-def test_get_insight_client_requires_enabled_insight() -> None:
+def test_get_insight_http_client_requires_enabled_insight() -> None:
     container = ServiceContainer(repository=MagicMock(), workspace_store=MagicMock())
 
     with pytest.raises(DomainError) as exc_info:
-        container.get_insight_client()
+        container.get_insight_http_client()
 
     assert exc_info.value.code == "INSIGHT_DISABLED"
 
@@ -112,13 +112,42 @@ def test_ensure_dir_exists_creates_sqlite_parent(tmp_path) -> None:
     assert db_path.parent.exists()
 
 
-def test_build_default_services_creates_insight_client_when_enabled(monkeypatch) -> None:
+def test_build_default_services_creates_insight_http_client_when_enabled(monkeypatch) -> None:
     monkeypatch.setenv("WITTY_INSIGHT_ENABLED", "true")
     monkeypatch.setenv("WITTY_INSIGHT_BASE_URL", "http://127.0.0.1:7396")
+    monkeypatch.setenv("WITTY_INSIGHT_TIMEOUT_SECONDS", "7.5")
+    monkeypatch.setenv("WITTY_INSIGHT_BEARER_TOKEN", "secret-token")
     monkeypatch.setattr(services_module, "create_sqlite_engine", lambda *_args, **_kwargs: MagicMock())
     monkeypatch.setattr(services_module, "init_db", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(services_module, "create_session_factory", lambda *_args, **_kwargs: MagicMock())
 
     container = services_module.build_default_services()
 
-    assert isinstance(container.insight_client, InsightClient)
+    assert isinstance(container.insight_http_client, AdaptorHttpClient)
+    assert container.insight_http_client.base_url == "http://127.0.0.1:7396"
+    assert container.insight_http_client._timeout == 7.5
+    assert container.insight_http_client._default_headers == {
+        "Authorization": "Bearer secret-token"
+    }
+
+
+@pytest.mark.asyncio
+async def test_service_container_close_closes_insight_http_client() -> None:
+    insight_http_client = MagicMock(spec=AdaptorHttpClient)
+    insight_http_client.close = AsyncMock()
+    container = ServiceContainer(
+        repository=MagicMock(),
+        workspace_store=MagicMock(),
+        insight_http_client=insight_http_client,
+    )
+
+    await container.close()
+
+    insight_http_client.close.assert_awaited_once_with()
+
+
+@pytest.mark.asyncio
+async def test_service_container_close_is_noop_without_insight_http_client() -> None:
+    container = ServiceContainer(repository=MagicMock(), workspace_store=MagicMock())
+
+    await container.close()

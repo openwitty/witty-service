@@ -1,15 +1,28 @@
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any
-from urllib.parse import urlparse
 
-from witty_service.domain.errors import DomainError, insight_session_mapping_not_found
-from witty_service.persistence.repositories import AgentRecord, AgentWithRuntimeStateRecord, SessionRecord
+import httpx
+
+from witty_service.domain.errors import (
+    DomainError,
+    insight_bad_response,
+    insight_session_mapping_not_found,
+    insight_timeout,
+    insight_unavailable,
+    insight_upstream_error,
+)
+from witty_service.persistence.repositories import SessionRecord
+from urllib.parse import urlparse
+from witty_service.persistence.repositories import AgentWithRuntimeStateRecord
 
 
 if TYPE_CHECKING:
     from witty_service.api.services import ServiceContainer
 
+
+logger = logging.getLogger(__name__)
 
 _RUNTIME_TYPE = "openclaw"
 _INTERRUPTION_SEVERITIES = ("critical", "high", "medium", "low")
@@ -20,8 +33,8 @@ class InsightFacade:
         self._services = services
         self._repository = services.repository
 
-    def get_capabilities(self) -> dict[str, Any]:
-        enabled = self._services.insight_client is not None
+    async def get_capabilities(self) -> dict[str, Any]:
+        enabled = self._services.insight_http_client is not None
         if not enabled:
             return {
                 "enabled": False,
@@ -30,7 +43,7 @@ class InsightFacade:
             }
 
         try:
-            self._services.get_insight_client().get_health()
+            await self._insight_get_json("/health")
         except DomainError:
             reachable = False
         else:
@@ -42,7 +55,7 @@ class InsightFacade:
             "features": self._feature_flags(True),
         }
 
-    def list_witty_agents(self) -> list[dict[str, Any]]:
+    async def list_witty_agents(self) -> list[dict[str, Any]]:
         return [
             {
                 "witty_agent_id": agent.id,
@@ -52,7 +65,7 @@ class InsightFacade:
             for agent in self._repository.list_agents()
         ]
 
-    def list_sessions(
+    async def list_sessions(
         self,
         *,
         witty_agent_id: str | None = None,
@@ -63,12 +76,13 @@ class InsightFacade:
         if not runtime_session_ids:
             return []
 
-        raw_sessions = self._services.get_insight_client().get_sessions(
-            self._raw_params(
+        raw_sessions = await self._insight_get_json(
+            "/api/sessions",
+            params=self._raw_params(
                 start_ns=start_ns,
                 end_ns=end_ns,
                 session_ids=runtime_session_ids,
-            )
+            ),
         )
         if not isinstance(raw_sessions, list):
             return []
@@ -82,10 +96,7 @@ class InsightFacade:
             if session.runtime_session_id is not None
         }
         agent_ids = self._dedupe_preserve_order(
-            [
-                session.agent_id
-                for session in sessions_by_runtime_id.values()
-            ]
+            [session.agent_id for session in sessions_by_runtime_id.values()]
         )
         agents_by_id = {
             agent.id: agent
@@ -99,12 +110,25 @@ class InsightFacade:
             runtime_session_id = item.get("session_id")
             if not isinstance(runtime_session_id, str):
                 continue
+
             session = sessions_by_runtime_id.get(runtime_session_id)
             if session is None:
+                logger.warning(
+                    "runtime session is missing a local witty session mapping: runtime_session_id=%s",
+                    runtime_session_id,
+                )
                 continue
+
             agent = agents_by_id.get(session.agent_id)
             if agent is None:
+                logger.warning(
+                    "mapped witty session references a missing agent: session_id=%s runtime_session_id=%s agent_id=%s",
+                    session.id,
+                    runtime_session_id,
+                    session.agent_id,
+                )
                 continue
+
             enriched.append(
                 {
                     "session_id": session.id,
@@ -122,7 +146,7 @@ class InsightFacade:
             )
         return enriched
 
-    def get_session_traces(
+    async def get_session_traces(
         self,
         witty_session_id: str,
         *,
@@ -130,37 +154,37 @@ class InsightFacade:
         end_ns: int | None = None,
     ) -> Any:
         session = self._require_runtime_session(witty_session_id)
-        return self._services.get_insight_client().get_session_traces(
-            session.runtime_session_id,
-            self._raw_params(start_ns=start_ns, end_ns=end_ns),
+        return await self._insight_get_json(
+            f"/api/sessions/{session.runtime_session_id}/traces",
+            params=self._raw_params(start_ns=start_ns, end_ns=end_ns),
         )
 
-    def get_session_interruptions(self, witty_session_id: str) -> list[dict[str, Any]]:
+    async def get_session_interruptions(self, witty_session_id: str) -> list[dict[str, Any]]:
         session = self._require_runtime_session(witty_session_id)
-        result = self._services.get_insight_client().get_session_interruptions(
-            session.runtime_session_id,
+        result = await self._insight_get_json(
+            f"/api/sessions/{session.runtime_session_id}/interruptions"
         )
         if not isinstance(result, list):
             return []
         return self._remap_interruption_records(result)
 
-    def get_conversation_interruptions(self, conversation_id: str) -> list[dict[str, Any]]:
-        result = self._services.get_insight_client().get_conversation_interruptions(conversation_id)
+    async def get_conversation_interruptions(self, conversation_id: str) -> list[dict[str, Any]]:
+        result = await self._insight_get_json(f"/api/conversations/{conversation_id}/interruptions")
         if not isinstance(result, list):
             return []
         return self._remap_interruption_records(result)
 
-    def get_trace_detail(self, trace_id: str) -> Any:
-        return self._services.get_insight_client().get_trace_detail(trace_id)
+    async def get_trace_detail(self, trace_id: str) -> Any:
+        return await self._insight_get_json(f"/api/traces/{trace_id}")
 
-    def get_conversation_detail(self, conversation_id: str) -> Any:
-        return self._services.get_insight_client().get_conversation_detail(conversation_id)
+    async def get_conversation_detail(self, conversation_id: str) -> Any:
+        return await self._insight_get_json(f"/api/conversations/{conversation_id}")
 
-    def resolve_interruption(self, interruption_id: str) -> dict[str, Any]:
-        result = self._services.get_insight_client().resolve_interruption(interruption_id)
+    async def resolve_interruption(self, interruption_id: str) -> dict[str, Any]:
+        result = await self._insight_post_json(f"/api/interruptions/{interruption_id}/resolve")
         return result if isinstance(result, dict) else {"status": "resolved"}
 
-    def get_timeseries(
+    async def get_timeseries(
         self,
         *,
         witty_agent_id: str | None = None,
@@ -171,17 +195,18 @@ class InsightFacade:
         runtime_session_ids = self._list_managed_runtime_session_ids(witty_agent_id=witty_agent_id)
         if not runtime_session_ids:
             return {"token_series": [], "model_series": []}
-        result = self._services.get_insight_client().get_timeseries(
-            self._raw_params(
+        result = await self._insight_get_json(
+            "/api/timeseries",
+            params=self._raw_params(
                 start_ns=start_ns,
                 end_ns=end_ns,
                 buckets=buckets,
                 session_ids=runtime_session_ids,
-            )
+            ),
         )
         return result if isinstance(result, dict) else {"token_series": [], "model_series": []}
 
-    def get_interruption_count(
+    async def get_interruption_count(
         self,
         *,
         witty_agent_id: str | None = None,
@@ -191,16 +216,17 @@ class InsightFacade:
         runtime_session_ids = self._list_managed_runtime_session_ids(witty_agent_id=witty_agent_id)
         if not runtime_session_ids:
             return self._empty_interruption_count()
-        result = self._services.get_insight_client().get_interruption_count(
-            self._raw_params(
+        result = await self._insight_get_json(
+            "/api/interruptions/count",
+            params=self._raw_params(
                 start_ns=start_ns,
                 end_ns=end_ns,
                 session_ids=runtime_session_ids,
-            )
+            ),
         )
         return result if isinstance(result, dict) else self._empty_interruption_count()
 
-    def get_interruption_stats(
+    async def get_interruption_stats(
         self,
         *,
         witty_agent_id: str | None = None,
@@ -210,16 +236,17 @@ class InsightFacade:
         runtime_session_ids = self._list_managed_runtime_session_ids(witty_agent_id=witty_agent_id)
         if not runtime_session_ids:
             return []
-        result = self._services.get_insight_client().get_interruption_stats(
-            self._raw_params(
+        result = await self._insight_get_json(
+            "/api/interruptions/stats",
+            params=self._raw_params(
                 start_ns=start_ns,
                 end_ns=end_ns,
                 session_ids=runtime_session_ids,
-            )
+            ),
         )
         return result if isinstance(result, list) else []
 
-    def get_interruption_session_counts(
+    async def get_interruption_session_counts(
         self,
         *,
         witty_agent_id: str | None = None,
@@ -230,12 +257,13 @@ class InsightFacade:
         if not runtime_session_ids:
             return []
 
-        result = self._services.get_insight_client().get_interruption_session_counts(
-            self._raw_params(
+        result = await self._insight_get_json(
+            "/api/interruptions/session-counts",
+            params=self._raw_params(
                 start_ns=start_ns,
                 end_ns=end_ns,
                 session_ids=runtime_session_ids,
-            )
+            ),
         )
         if not isinstance(result, list):
             return []
@@ -244,7 +272,11 @@ class InsightFacade:
             session.runtime_session_id: session
             for session in self._repository.list_sessions_by_runtime_session_ids(
                 _RUNTIME_TYPE,
-                [item.get("session_id") for item in result if isinstance(item, dict) and isinstance(item.get("session_id"), str)],
+                [
+                    item.get("session_id")
+                    for item in result
+                    if isinstance(item, dict) and isinstance(item.get("session_id"), str)
+                ],
             )
             if session.runtime_session_id is not None
         }
@@ -270,7 +302,7 @@ class InsightFacade:
             )
         return remapped
 
-    def get_interruption_conversation_counts(
+    async def get_interruption_conversation_counts(
         self,
         *,
         witty_agent_id: str | None = None,
@@ -280,26 +312,27 @@ class InsightFacade:
         runtime_session_ids = self._list_managed_runtime_session_ids(witty_agent_id=witty_agent_id)
         if not runtime_session_ids:
             return []
-        result = self._services.get_insight_client().get_interruption_conversation_counts(
-            self._raw_params(
+        result = await self._insight_get_json(
+            "/api/interruptions/conversation-counts",
+            params=self._raw_params(
                 start_ns=start_ns,
                 end_ns=end_ns,
                 session_ids=runtime_session_ids,
-            )
+            ),
         )
         return result if isinstance(result, list) else []
 
-    def delete_agent_health(self, pid: int) -> dict[str, Any]:
-        result = self._services.get_insight_client().delete_agent_health(pid)
+    async def delete_agent_health(self, pid: int) -> dict[str, Any]:
+        result = await self._insight_delete_json(f"/api/agent-health/{pid}")
         return result if isinstance(result, dict) else {"ok": True}
 
-    def restart_agent_health(self, pid: int) -> dict[str, Any]:
-        result = self._services.get_insight_client().restart_agent_health(pid)
+    async def restart_agent_health(self, pid: int) -> dict[str, Any]:
+        result = await self._insight_post_json(f"/api/agent-health/{pid}/restart")
         return result if isinstance(result, dict) else {"ok": True, "new_pid": 0, "cmd": []}
 
-    def export_atif_session(self, witty_session_id: str) -> dict[str, Any]:
+    async def export_atif_session(self, witty_session_id: str) -> dict[str, Any]:
         session = self._require_runtime_session(witty_session_id)
-        result = self._services.get_insight_client().export_atif_session(session.runtime_session_id)
+        result = await self._insight_get_json(f"/api/export/atif/session/{session.runtime_session_id}")
         if not isinstance(result, dict):
             return {}
         document = dict(result)
@@ -307,12 +340,12 @@ class InsightFacade:
         document["runtime_session_id"] = session.runtime_session_id
         return document
 
-    def export_atif_conversation(self, conversation_id: str) -> dict[str, Any]:
-        result = self._services.get_insight_client().export_atif_conversation(conversation_id)
+    async def export_atif_conversation(self, conversation_id: str) -> dict[str, Any]:
+        result = await self._insight_get_json(f"/api/export/atif/conversation/{conversation_id}")
         return result if isinstance(result, dict) else {}
 
-    def get_agent_health(self) -> dict[str, Any]:
-        raw_result = self._services.get_insight_client().get_agent_health()
+    async def get_agent_health(self) -> dict[str, Any]:
+        raw_result = await self._insight_get_json("/api/agent-health")
         raw_agents = raw_result.get("agents") if isinstance(raw_result, dict) else []
         runtimes = [
             self._normalize_runtime_health(item)
@@ -344,6 +377,83 @@ class InsightFacade:
             if isinstance(raw_result, dict)
             else 0,
         }
+
+    async def _insight_get_json(
+        self,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+    ) -> Any:
+        client = self._services.get_insight_http_client()
+        try:
+            return await client.get(path, params=params)
+        except httpx.ConnectError as exc:
+            raise insight_unavailable(base_url=client.base_url, path=path, reason=str(exc)) from exc
+        except httpx.TimeoutException as exc:
+            raise insight_timeout(
+                base_url=client.base_url,
+                path=path,
+                timeout_seconds=client._timeout,
+            ) from exc
+        except httpx.HTTPStatusError as exc:
+            raise insight_upstream_error(
+                base_url=client.base_url,
+                path=path,
+                status_code=exc.response.status_code,
+                response_text=exc.response.text,
+            ) from exc
+        except ValueError as exc:
+            raise insight_bad_response(base_url=client.base_url, path=path, reason=str(exc)) from exc
+
+    async def _insight_post_json(
+        self,
+        path: str,
+        *,
+        json: dict[str, Any] | None = None,
+        timeout: float | None = None,
+    ) -> Any:
+        client = self._services.get_insight_http_client()
+        try:
+            return await client.post(path, json=json, timeout=timeout)
+        except httpx.ConnectError as exc:
+            raise insight_unavailable(base_url=client.base_url, path=path, reason=str(exc)) from exc
+        except httpx.TimeoutException as exc:
+            raise insight_timeout(
+                base_url=client.base_url,
+                path=path,
+                timeout_seconds=client._timeout if timeout is None else timeout,
+            ) from exc
+        except httpx.HTTPStatusError as exc:
+            raise insight_upstream_error(
+                base_url=client.base_url,
+                path=path,
+                status_code=exc.response.status_code,
+                response_text=exc.response.text,
+            ) from exc
+        except ValueError as exc:
+            raise insight_bad_response(base_url=client.base_url, path=path, reason=str(exc)) from exc
+
+    async def _insight_delete_json(self, path: str) -> Any:
+        client = self._services.get_insight_http_client()
+        try:
+            return await client.delete(path)
+        except httpx.ConnectError as exc:
+            raise insight_unavailable(base_url=client.base_url, path=path, reason=str(exc)) from exc
+        except httpx.TimeoutException as exc:
+            raise insight_timeout(
+                base_url=client.base_url,
+                path=path,
+                timeout_seconds=client._timeout,
+            ) from exc
+        except httpx.HTTPStatusError as exc:
+            raise insight_upstream_error(
+                base_url=client.base_url,
+                path=path,
+                status_code=exc.response.status_code,
+                response_text=exc.response.text,
+            ) from exc
+        except ValueError as exc:
+            raise insight_bad_response(base_url=client.base_url, path=path, reason=str(exc)) from exc
 
     @staticmethod
     def _feature_flags(enabled: bool) -> dict[str, bool]:
@@ -543,24 +653,6 @@ class InsightFacade:
         }
 
     @staticmethod
-    def _normalize_severity_counts(raw: Any) -> dict[str, int]:
-        data = raw if isinstance(raw, dict) else {}
-        return {
-            severity: int(data.get(severity, 0) or 0)
-            for severity in _INTERRUPTION_SEVERITIES
-        }
-
-    @staticmethod
-    def _empty_interruption_count() -> dict[str, Any]:
-        return {
-            "total": 0,
-            "by_severity": {
-                severity: 0
-                for severity in _INTERRUPTION_SEVERITIES
-            },
-        }
-
-    @staticmethod
     def _metadata(payload: dict[str, Any]) -> dict[str, Any]:
         metadata = payload.get("metadata", {})
         return metadata if isinstance(metadata, dict) else {}
@@ -577,6 +669,24 @@ class InsightFacade:
     @staticmethod
     def _int_or_none(value: Any) -> int | None:
         return value if isinstance(value, int) else None
+
+    @staticmethod
+    def _normalize_severity_counts(raw: Any) -> dict[str, int]:
+        data = raw if isinstance(raw, dict) else {}
+        return {
+            severity: int(data.get(severity, 0) or 0)
+            for severity in _INTERRUPTION_SEVERITIES
+        }
+
+    @staticmethod
+    def _empty_interruption_count() -> dict[str, Any]:
+        return {
+            "total": 0,
+            "by_severity": {
+                severity: 0
+                for severity in _INTERRUPTION_SEVERITIES
+            },
+        }
 
     @staticmethod
     def _dedupe_preserve_order(values: list[str]) -> list[str]:

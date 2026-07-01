@@ -4,14 +4,14 @@ from fastapi import APIRouter, Depends, Request
 
 from witty_service.api.auth import require_bearer_auth
 from witty_service.api.insight_schemas import (
-    InsightAgentHealthResponse,
     InsightAgentHealthActionResponse,
+    InsightAgentHealthResponse,
     InsightAtifDocumentResponse,
     InsightCapabilitiesResponse,
     InsightConversationDetailResponse,
     InsightConversationInterruptionCountResponse,
-    InsightInterruptionRecordResponse,
     InsightInterruptionCountResponse,
+    InsightInterruptionRecordResponse,
     InsightInterruptionResolveResponse,
     InsightInterruptionTypeStatResponse,
     InsightRestartAgentHealthResponse,
@@ -37,26 +37,26 @@ def get_services(request: Request) -> ServiceContainer:
 
 
 @router.get("/capabilities", response_model=InsightCapabilitiesResponse)
-def get_capabilities(
+async def get_capabilities(
     services: ServiceContainer = Depends(get_services),
 ) -> InsightCapabilitiesResponse:
     return InsightCapabilitiesResponse.model_validate(
-        services.get_insight_facade().get_capabilities()
+        await services.get_insight_facade().get_capabilities()
     )
 
 
 @router.get("/witty-agents", response_model=list[InsightWittyAgentResponse])
-def list_witty_agents(
+async def list_witty_agents(
     services: ServiceContainer = Depends(get_services),
 ) -> list[InsightWittyAgentResponse]:
     return [
         InsightWittyAgentResponse.model_validate(item)
-        for item in services.get_insight_facade().list_witty_agents()
+        for item in await services.get_insight_facade().list_witty_agents()
     ]
 
 
 @router.get("/sessions", response_model=list[InsightSessionSummaryResponse])
-def list_sessions(
+async def list_sessions(
     witty_agent_id: str | None = None,
     start_ns: int | None = None,
     end_ns: int | None = None,
@@ -64,7 +64,7 @@ def list_sessions(
 ) -> list[InsightSessionSummaryResponse]:
     return [
         InsightSessionSummaryResponse.model_validate(item)
-        for item in services.get_insight_facade().list_sessions(
+        for item in await services.get_insight_facade().list_sessions(
             witty_agent_id=witty_agent_id,
             start_ns=start_ns,
             end_ns=end_ns,
@@ -73,7 +73,7 @@ def list_sessions(
 
 
 @router.get("/sessions/{session_id}/traces", response_model=list[InsightTraceSummaryResponse])
-def get_session_traces(
+async def get_session_traces(
     session_id: str,
     start_ns: int | None = None,
     end_ns: int | None = None,
@@ -81,7 +81,7 @@ def get_session_traces(
 ) -> list[InsightTraceSummaryResponse]:
     return [
         InsightTraceSummaryResponse.model_validate(item)
-        for item in services.get_insight_facade().get_session_traces(
+        for item in await services.get_insight_facade().get_session_traces(
             session_id,
             start_ns=start_ns,
             end_ns=end_ns,
@@ -93,24 +93,24 @@ def get_session_traces(
     "/sessions/{session_id}/interruptions",
     response_model=list[InsightInterruptionRecordResponse],
 )
-def get_session_interruptions(
+async def get_session_interruptions(
     session_id: str,
     services: ServiceContainer = Depends(get_services),
 ) -> list[InsightInterruptionRecordResponse]:
     return [
         InsightInterruptionRecordResponse.model_validate(item)
-        for item in services.get_insight_facade().get_session_interruptions(session_id)
+        for item in await services.get_insight_facade().get_session_interruptions(session_id)
     ]
 
 
 @router.get("/traces/{trace_id}", response_model=list[InsightTraceDetailResponse])
-def get_trace_detail(
+async def get_trace_detail(
     trace_id: str,
     services: ServiceContainer = Depends(get_services),
 ) -> list[InsightTraceDetailResponse]:
     return [
         InsightTraceDetailResponse.model_validate(item)
-        for item in services.get_insight_facade().get_trace_detail(trace_id)
+        for item in await services.get_insight_facade().get_trace_detail(trace_id)
     ]
 
 
@@ -118,13 +118,13 @@ def get_trace_detail(
     "/conversations/{conversation_id}",
     response_model=list[InsightConversationDetailResponse],
 )
-def get_conversation_detail(
+async def get_conversation_detail(
     conversation_id: str,
     services: ServiceContainer = Depends(get_services),
 ) -> list[InsightConversationDetailResponse]:
     return [
         InsightConversationDetailResponse.model_validate(item)
-        for item in services.get_insight_facade().get_conversation_detail(conversation_id)
+        for item in await services.get_insight_facade().get_conversation_detail(conversation_id)
     ]
 
 
@@ -132,18 +132,18 @@ def get_conversation_detail(
     "/conversations/{conversation_id}/interruptions",
     response_model=list[InsightInterruptionRecordResponse],
 )
-def get_conversation_interruptions(
+async def get_conversation_interruptions(
     conversation_id: str,
     services: ServiceContainer = Depends(get_services),
 ) -> list[InsightInterruptionRecordResponse]:
     return [
         InsightInterruptionRecordResponse.model_validate(item)
-        for item in services.get_insight_facade().get_conversation_interruptions(conversation_id)
+        for item in await services.get_insight_facade().get_conversation_interruptions(conversation_id)
     ]
 
 
 @router.get("/timeseries", response_model=InsightTimeseriesResponse)
-def get_timeseries(
+async def get_timeseries(
     witty_agent_id: str | None = None,
     start_ns: int | None = None,
     end_ns: int | None = None,
@@ -151,7 +151,7 @@ def get_timeseries(
     services: ServiceContainer = Depends(get_services),
 ) -> InsightTimeseriesResponse:
     return InsightTimeseriesResponse.model_validate(
-        services.get_insight_facade().get_timeseries(
+        await services.get_insight_facade().get_timeseries(
             witty_agent_id=witty_agent_id,
             start_ns=start_ns,
             end_ns=end_ns,
@@ -161,14 +161,14 @@ def get_timeseries(
 
 
 @router.get("/interruptions/count", response_model=InsightInterruptionCountResponse)
-def get_interruption_count(
+async def get_interruption_count(
     witty_agent_id: str | None = None,
     start_ns: int | None = None,
     end_ns: int | None = None,
     services: ServiceContainer = Depends(get_services),
 ) -> InsightInterruptionCountResponse:
     return InsightInterruptionCountResponse.model_validate(
-        services.get_insight_facade().get_interruption_count(
+        await services.get_insight_facade().get_interruption_count(
             witty_agent_id=witty_agent_id,
             start_ns=start_ns,
             end_ns=end_ns,
@@ -177,7 +177,7 @@ def get_interruption_count(
 
 
 @router.get("/interruptions/stats", response_model=list[InsightInterruptionTypeStatResponse])
-def get_interruption_stats(
+async def get_interruption_stats(
     witty_agent_id: str | None = None,
     start_ns: int | None = None,
     end_ns: int | None = None,
@@ -185,7 +185,7 @@ def get_interruption_stats(
 ) -> list[InsightInterruptionTypeStatResponse]:
     return [
         InsightInterruptionTypeStatResponse.model_validate(item)
-        for item in services.get_insight_facade().get_interruption_stats(
+        for item in await services.get_insight_facade().get_interruption_stats(
             witty_agent_id=witty_agent_id,
             start_ns=start_ns,
             end_ns=end_ns,
@@ -197,7 +197,7 @@ def get_interruption_stats(
     "/interruptions/session-counts",
     response_model=list[InsightSessionInterruptionCountResponse],
 )
-def get_interruption_session_counts(
+async def get_interruption_session_counts(
     witty_agent_id: str | None = None,
     start_ns: int | None = None,
     end_ns: int | None = None,
@@ -205,7 +205,7 @@ def get_interruption_session_counts(
 ) -> list[InsightSessionInterruptionCountResponse]:
     return [
         InsightSessionInterruptionCountResponse.model_validate(item)
-        for item in services.get_insight_facade().get_interruption_session_counts(
+        for item in await services.get_insight_facade().get_interruption_session_counts(
             witty_agent_id=witty_agent_id,
             start_ns=start_ns,
             end_ns=end_ns,
@@ -217,7 +217,7 @@ def get_interruption_session_counts(
     "/interruptions/conversation-counts",
     response_model=list[InsightConversationInterruptionCountResponse],
 )
-def get_interruption_conversation_counts(
+async def get_interruption_conversation_counts(
     witty_agent_id: str | None = None,
     start_ns: int | None = None,
     end_ns: int | None = None,
@@ -225,7 +225,7 @@ def get_interruption_conversation_counts(
 ) -> list[InsightConversationInterruptionCountResponse]:
     return [
         InsightConversationInterruptionCountResponse.model_validate(item)
-        for item in services.get_insight_facade().get_interruption_conversation_counts(
+        for item in await services.get_insight_facade().get_interruption_conversation_counts(
             witty_agent_id=witty_agent_id,
             start_ns=start_ns,
             end_ns=end_ns,
@@ -237,41 +237,41 @@ def get_interruption_conversation_counts(
     "/interruptions/{interruption_id}/resolve",
     response_model=InsightInterruptionResolveResponse,
 )
-def resolve_interruption(
+async def resolve_interruption(
     interruption_id: str,
     services: ServiceContainer = Depends(get_services),
 ) -> InsightInterruptionResolveResponse:
     return InsightInterruptionResolveResponse.model_validate(
-        services.get_insight_facade().resolve_interruption(interruption_id)
+        await services.get_insight_facade().resolve_interruption(interruption_id)
     )
 
 
 @router.get("/agent-health", response_model=InsightAgentHealthResponse)
-def get_agent_health(
+async def get_agent_health(
     services: ServiceContainer = Depends(get_services),
 ) -> InsightAgentHealthResponse:
     return InsightAgentHealthResponse.model_validate(
-        services.get_insight_facade().get_agent_health()
+        await services.get_insight_facade().get_agent_health()
     )
 
 
 @router.delete("/agent-health/{pid}", response_model=InsightAgentHealthActionResponse)
-def delete_agent_health(
+async def delete_agent_health(
     pid: int,
     services: ServiceContainer = Depends(get_services),
 ) -> InsightAgentHealthActionResponse:
     return InsightAgentHealthActionResponse.model_validate(
-        services.get_insight_facade().delete_agent_health(pid)
+        await services.get_insight_facade().delete_agent_health(pid)
     )
 
 
 @router.post("/agent-health/{pid}/restart", response_model=InsightRestartAgentHealthResponse)
-def restart_agent_health(
+async def restart_agent_health(
     pid: int,
     services: ServiceContainer = Depends(get_services),
 ) -> InsightRestartAgentHealthResponse:
     return InsightRestartAgentHealthResponse.model_validate(
-        services.get_insight_facade().restart_agent_health(pid)
+        await services.get_insight_facade().restart_agent_health(pid)
     )
 
 
@@ -279,12 +279,12 @@ def restart_agent_health(
     "/export/atif/session/{session_id}",
     response_model=InsightAtifDocumentResponse,
 )
-def export_atif_session(
+async def export_atif_session(
     session_id: str,
     services: ServiceContainer = Depends(get_services),
 ) -> InsightAtifDocumentResponse:
     return InsightAtifDocumentResponse.model_validate(
-        services.get_insight_facade().export_atif_session(session_id)
+        await services.get_insight_facade().export_atif_session(session_id)
     )
 
 
@@ -292,10 +292,10 @@ def export_atif_session(
     "/export/atif/conversation/{conversation_id}",
     response_model=InsightAtifDocumentResponse,
 )
-def export_atif_conversation(
+async def export_atif_conversation(
     conversation_id: str,
     services: ServiceContainer = Depends(get_services),
 ) -> InsightAtifDocumentResponse:
     return InsightAtifDocumentResponse.model_validate(
-        services.get_insight_facade().export_atif_conversation(conversation_id)
+        await services.get_insight_facade().export_atif_conversation(conversation_id)
     )

@@ -169,6 +169,10 @@ def create_app(*, services: ServiceContainer | None = None) -> FastAPI:
                 lambda st=sandbox_type: asyncio.create_task(_recover_agents(st)),
             )
 
+    @app.on_event("shutdown")
+    async def close_services() -> None:
+        await app.state.services.close()
+
     app.include_router(agents_router)
     app.include_router(cve_router)
     app.include_router(models_router)

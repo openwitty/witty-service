@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
 from unittest.mock import MagicMock
 
+import httpx
 import pytest
 
 from witty_service.api.services import ServiceContainer
 from witty_service.domain.enums import AgentStatus
-from witty_service.domain.errors import DomainError, insight_unavailable
+from witty_service.domain.errors import DomainError
 from witty_service.persistence.db import create_session_factory, create_sqlite_engine, init_db
 from witty_service.persistence.repositories import SqliteRepository
 
@@ -60,140 +62,75 @@ def _create_session(
         )
 
 
-class FakeInsightClient:
+def _http_status_error(method: str, path: str, status_code: int) -> httpx.HTTPStatusError:
+    request = httpx.Request(method, f"http://localhost:7396{path}")
+    response = httpx.Response(status_code, request=request, text="bad gateway")
+    return httpx.HTTPStatusError("upstream failure", request=request, response=response)
+
+
+class FakeInsightHttpClient:
     def __init__(self) -> None:
-        self.health_result: Any = {"ok": True}
-        self.sessions_result: Any = []
-        self.session_traces_result: Any = []
-        self.session_interruptions_result: Any = []
-        self.conversation_interruptions_result: Any = []
-        self.timeseries_result: Any = {"token_series": [], "model_series": []}
-        self.interruption_count_result: Any = {
-            "total": 0,
-            "by_severity": {"critical": 0, "high": 0, "medium": 0, "low": 0},
-        }
-        self.interruption_stats_result: Any = []
-        self.interruption_session_counts_result: Any = []
-        self.interruption_conversation_counts_result: Any = []
-        self.agent_health_result: Any = {"agents": [], "last_scan_time": 0}
-        self.trace_detail_result: Any = []
-        self.conversation_detail_result: Any = []
-        self.resolve_interruption_result: Any = {"status": "resolved"}
-        self.delete_agent_health_result: Any = {"ok": True}
-        self.restart_agent_health_result: Any = {"ok": True, "new_pid": 0, "cmd": []}
-        self.export_atif_session_result: Any = {
-            "schema_version": "1.6",
-            "session_id": "runtime-session-1",
-            "agent": {},
-            "steps": [],
-        }
-        self.export_atif_conversation_result: Any = {
-            "schema_version": "1.6",
-            "session_id": "conversation-1",
-            "agent": {},
-            "steps": [],
-        }
-        self.health_error: Exception | None = None
-        self.calls: list[tuple[str, Any]] = []
+        self.calls: list[tuple[str, str, Any]] = []
+        self.get_results: dict[str, Any] = {"/health": {"ok": True}}
+        self.post_results: dict[str, Any] = {}
+        self.delete_results: dict[str, Any] = {}
+        self.get_errors: dict[str, Exception] = {}
+        self.post_errors: dict[str, Exception] = {}
+        self.delete_errors: dict[str, Exception] = {}
+        self.base_url = "http://localhost:7396"
+        self._timeout = 5.0
 
-    def get_health(self) -> Any:
-        self.calls.append(("get_health", None))
-        if self.health_error is not None:
-            raise self.health_error
-        return self.health_result
+    async def get(self, path: str, params: dict[str, Any] | None = None) -> Any:
+        self.calls.append(("GET", path, params))
+        error = self.get_errors.get(path)
+        if error is not None:
+            raise error
+        return self.get_results.get(path)
 
-    def get_sessions(self, params: dict[str, Any] | None = None) -> Any:
-        self.calls.append(("get_sessions", params))
-        return self.sessions_result
-
-    def get_session_traces(self, session_id: str, params: dict[str, Any] | None = None) -> Any:
-        self.calls.append(("get_session_traces", {"session_id": session_id, "params": params}))
-        return self.session_traces_result
-
-    def get_session_interruptions(self, session_id: str) -> Any:
-        self.calls.append(("get_session_interruptions", session_id))
-        return self.session_interruptions_result
-
-    def get_conversation_interruptions(self, conversation_id: str) -> Any:
-        self.calls.append(("get_conversation_interruptions", conversation_id))
-        return self.conversation_interruptions_result
-
-    def get_trace_detail(self, trace_id: str) -> Any:
-        self.calls.append(("get_trace_detail", trace_id))
-        return self.trace_detail_result
-
-    def get_conversation_detail(self, conversation_id: str) -> Any:
-        self.calls.append(("get_conversation_detail", conversation_id))
-        return self.conversation_detail_result
-
-    def resolve_interruption(self, interruption_id: str) -> Any:
-        self.calls.append(("resolve_interruption", interruption_id))
-        return self.resolve_interruption_result
-
-    def delete_agent_health(self, pid: int) -> Any:
-        self.calls.append(("delete_agent_health", pid))
-        return self.delete_agent_health_result
-
-    def restart_agent_health(self, pid: int) -> Any:
-        self.calls.append(("restart_agent_health", pid))
-        return self.restart_agent_health_result
-
-    def export_atif_session(self, session_id: str) -> Any:
-        self.calls.append(("export_atif_session", session_id))
-        return self.export_atif_session_result
-
-    def export_atif_conversation(self, conversation_id: str) -> Any:
-        self.calls.append(("export_atif_conversation", conversation_id))
-        return self.export_atif_conversation_result
-
-    def get_timeseries(self, params: dict[str, Any] | None = None) -> Any:
-        self.calls.append(("get_timeseries", params))
-        return self.timeseries_result
-
-    def get_interruption_count(self, params: dict[str, Any] | None = None) -> Any:
-        self.calls.append(("get_interruption_count", params))
-        return self.interruption_count_result
-
-    def get_interruption_stats(self, params: dict[str, Any] | None = None) -> Any:
-        self.calls.append(("get_interruption_stats", params))
-        return self.interruption_stats_result
-
-    def get_interruption_session_counts(self, params: dict[str, Any] | None = None) -> Any:
-        self.calls.append(("get_interruption_session_counts", params))
-        return self.interruption_session_counts_result
-
-    def get_interruption_conversation_counts(
+    async def post(
         self,
-        params: dict[str, Any] | None = None,
+        path: str,
+        json: dict[str, Any] | None = None,
+        timeout: float | None = None,
     ) -> Any:
-        self.calls.append(("get_interruption_conversation_counts", params))
-        return self.interruption_conversation_counts_result
+        self.calls.append(("POST", path, {"json": json, "timeout": timeout}))
+        error = self.post_errors.get(path)
+        if error is not None:
+            raise error
+        return self.post_results.get(path)
 
-    def get_agent_health(self) -> Any:
-        self.calls.append(("get_agent_health", None))
-        return self.agent_health_result
+    async def delete(self, path: str) -> Any:
+        self.calls.append(("DELETE", path, None))
+        error = self.delete_errors.get(path)
+        if error is not None:
+            raise error
+        return self.delete_results.get(path)
 
 
-def test_get_capabilities_reports_unreachable_when_health_probe_fails(
+def _make_facade(
     repo: SqliteRepository,
-) -> None:
+    insight_http_client: FakeInsightHttpClient | None = None,
+):
     from witty_service.application.insight_facade import InsightFacade
 
-    insight_client = FakeInsightClient()
-    insight_client.health_error = insight_unavailable(
-        base_url="http://127.0.0.1:7396",
-        path="/health",
-        reason="connection refused",
-    )
-    facade = InsightFacade(
+    return InsightFacade(
         ServiceContainer(
             repository=repo,
             workspace_store=MagicMock(),
-            insight_client=insight_client,
+            insight_http_client=insight_http_client,
         ),
     )
 
-    assert facade.get_capabilities() == {
+
+@pytest.mark.asyncio
+async def test_get_capabilities_reports_unreachable_when_health_probe_fails(
+    repo: SqliteRepository,
+) -> None:
+    insight_http_client = FakeInsightHttpClient()
+    insight_http_client.get_errors["/health"] = httpx.ConnectError("connection refused")
+    facade = _make_facade(repo, insight_http_client)
+
+    assert await facade.get_capabilities() == {
         "enabled": True,
         "reachable": False,
         "features": {
@@ -205,18 +142,21 @@ def test_get_capabilities_reports_unreachable_when_health_probe_fails(
     }
 
 
-def test_list_sessions_filters_to_all_managed_runtime_sessions_and_enriches(
+@pytest.mark.asyncio
+async def test_list_sessions_enriches_managed_sessions_and_warns_for_missing_links(
     repo: SqliteRepository,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
-    from witty_service.application.insight_facade import InsightFacade
-
     _create_agent(repo, "agent-1", "Alpha")
     _create_agent(repo, "agent-2", "Beta")
     _create_session(repo, agent_id="agent-1", session_id="session-1", runtime_session_id="runtime-1")
     _create_session(repo, agent_id="agent-2", session_id="session-2", runtime_session_id="runtime-2")
+    repo.list_agent_records_by_ids = MagicMock(
+        return_value=repo.list_agent_records_by_ids(["agent-1"])
+    )
 
-    insight_client = FakeInsightClient()
-    insight_client.sessions_result = [
+    insight_http_client = FakeInsightHttpClient()
+    insight_http_client.get_results["/api/sessions"] = [
         {
             "session_id": "runtime-1",
             "conversation_count": 3,
@@ -237,19 +177,24 @@ def test_list_sessions_filters_to_all_managed_runtime_sessions_and_enriches(
             "model": "gpt-4o-mini",
             "agent_name": "raw-beta",
         },
+        {
+            "session_id": "runtime-missing",
+            "conversation_count": 1,
+            "first_seen_ns": 500,
+            "last_seen_ns": 600,
+            "total_input_tokens": 2,
+            "total_output_tokens": 3,
+            "model": "gpt-4.1",
+        },
     ]
-    facade = InsightFacade(
-        ServiceContainer(
-            repository=repo,
-            workspace_store=MagicMock(),
-            insight_client=insight_client,
-        ),
-    )
+    facade = _make_facade(repo, insight_http_client)
 
-    result = facade.list_sessions()
+    with caplog.at_level(logging.WARNING):
+        result = await facade.list_sessions()
 
-    assert insight_client.calls[-1] == (
-        "get_sessions",
+    assert insight_http_client.calls[-1] == (
+        "GET",
+        "/api/sessions",
         {"session_ids": ["runtime-1", "runtime-2"]},
     )
     assert result == [
@@ -265,263 +210,182 @@ def test_list_sessions_filters_to_all_managed_runtime_sessions_and_enriches(
             "total_input_tokens": 11,
             "total_output_tokens": 7,
             "model": "gpt-4o",
-        },
-        {
-            "session_id": "session-2",
-            "runtime_session_id": "runtime-2",
-            "witty_agent_id": "agent-2",
-            "witty_agent_name": "Beta",
-            "agent_name": "Beta",
-            "conversation_count": 2,
-            "first_seen_ns": 200,
-            "last_seen_ns": 400,
-            "total_input_tokens": 5,
-            "total_output_tokens": 6,
-            "model": "gpt-4o-mini",
-        },
+        }
     ]
+    assert "runtime session is missing a local witty session mapping" in caplog.text
+    assert "mapped witty session references a missing agent" in caplog.text
 
 
-def test_get_session_traces_uses_witty_session_runtime_mapping(repo: SqliteRepository) -> None:
-    from witty_service.application.insight_facade import InsightFacade
-
+@pytest.mark.asyncio
+async def test_get_session_traces_uses_witty_session_runtime_mapping(
+    repo: SqliteRepository,
+) -> None:
     _create_agent(repo, "agent-1", "Alpha")
     _create_session(repo, agent_id="agent-1", session_id="session-1", runtime_session_id="runtime-1")
-    insight_client = FakeInsightClient()
-    insight_client.session_traces_result = [{"trace_id": "trace-1"}]
-    facade = InsightFacade(
-        ServiceContainer(
-            repository=repo,
-            workspace_store=MagicMock(),
-            insight_client=insight_client,
-        ),
-    )
+    insight_http_client = FakeInsightHttpClient()
+    insight_http_client.get_results["/api/sessions/runtime-1/traces"] = [{"trace_id": "trace-1"}]
+    facade = _make_facade(repo, insight_http_client)
 
-    result = facade.get_session_traces("session-1", start_ns=10, end_ns=20)
+    result = await facade.get_session_traces("session-1", start_ns=10, end_ns=20)
 
-    assert insight_client.calls[-1] == (
-        "get_session_traces",
-        {"session_id": "runtime-1", "params": {"start_ns": 10, "end_ns": 20}},
+    assert insight_http_client.calls[-1] == (
+        "GET",
+        "/api/sessions/runtime-1/traces",
+        {"start_ns": 10, "end_ns": 20},
     )
     assert result == [{"trace_id": "trace-1"}]
 
 
-def test_get_session_traces_raises_when_runtime_mapping_is_missing(
+@pytest.mark.asyncio
+async def test_get_session_traces_raises_when_runtime_mapping_is_missing(
     repo: SqliteRepository,
 ) -> None:
-    from witty_service.application.insight_facade import InsightFacade
-
     _create_agent(repo, "agent-1", "Alpha")
     _create_session(repo, agent_id="agent-1", session_id="session-1")
-    facade = InsightFacade(
-        ServiceContainer(
-            repository=repo,
-            workspace_store=MagicMock(),
-            insight_client=FakeInsightClient(),
-        ),
-    )
+    facade = _make_facade(repo, FakeInsightHttpClient())
 
     with pytest.raises(DomainError) as exc_info:
-        facade.get_session_traces("session-1")
+        await facade.get_session_traces("session-1")
 
     assert exc_info.value.code == "INSIGHT_SESSION_MAPPING_NOT_FOUND"
 
 
-def test_get_session_interruptions_uses_mapping_and_remaps_session_identity(
+@pytest.mark.asyncio
+async def test_get_session_interruptions_remaps_runtime_session_ids(
     repo: SqliteRepository,
 ) -> None:
-    from witty_service.application.insight_facade import InsightFacade
-
     _create_agent(repo, "agent-1", "Alpha")
     _create_session(repo, agent_id="agent-1", session_id="session-1", runtime_session_id="runtime-1")
-    insight_client = FakeInsightClient()
-    insight_client.session_interruptions_result = [
+    insight_http_client = FakeInsightHttpClient()
+    insight_http_client.get_results["/api/sessions/runtime-1/interruptions"] = [
         {
-            "id": 1,
             "interruption_id": "interrupt-1",
             "session_id": "runtime-1",
-            "trace_id": "trace-1",
-            "conversation_id": "conv-1",
-            "call_id": "call-1",
-            "pid": 123,
-            "agent_name": "raw-alpha",
-            "interruption_type": "agent_crash",
             "severity": "critical",
-            "occurred_at_ns": 100,
-            "detail": "crashed",
-            "resolved": False,
         }
     ]
-    facade = InsightFacade(
-        ServiceContainer(
-            repository=repo,
-            workspace_store=MagicMock(),
-            insight_client=insight_client,
-        ),
-    )
+    facade = _make_facade(repo, insight_http_client)
 
-    result = facade.get_session_interruptions("session-1")
-
-    assert insight_client.calls[-1] == ("get_session_interruptions", "runtime-1")
-    assert result[0]["session_id"] == "session-1"
-    assert result[0]["runtime_session_id"] == "runtime-1"
-
-
-def test_get_conversation_interruptions_remaps_managed_runtime_session_ids(
-    repo: SqliteRepository,
-) -> None:
-    from witty_service.application.insight_facade import InsightFacade
-
-    _create_agent(repo, "agent-1", "Alpha")
-    _create_session(repo, agent_id="agent-1", session_id="session-1", runtime_session_id="runtime-1")
-    insight_client = FakeInsightClient()
-    insight_client.conversation_interruptions_result = [
-        {
-            "id": 1,
-            "interruption_id": "interrupt-1",
-            "session_id": "runtime-1",
-            "trace_id": "trace-1",
-            "conversation_id": "conv-1",
-            "call_id": "call-1",
-            "pid": 123,
-            "agent_name": "raw-alpha",
-            "interruption_type": "agent_crash",
-            "severity": "critical",
-            "occurred_at_ns": 100,
-            "detail": "crashed",
-            "resolved": False,
-        }
-    ]
-    facade = InsightFacade(
-        ServiceContainer(
-            repository=repo,
-            workspace_store=MagicMock(),
-            insight_client=insight_client,
-        ),
-    )
-
-    result = facade.get_conversation_interruptions("conv-1")
-
-    assert insight_client.calls[-1] == ("get_conversation_interruptions", "conv-1")
-    assert result[0]["session_id"] == "session-1"
-    assert result[0]["runtime_session_id"] == "runtime-1"
-
-
-def test_export_atif_session_uses_mapping_and_rewrites_session_id(
-    repo: SqliteRepository,
-) -> None:
-    from witty_service.application.insight_facade import InsightFacade
-
-    _create_agent(repo, "agent-1", "Alpha")
-    _create_session(repo, agent_id="agent-1", session_id="session-1", runtime_session_id="runtime-1")
-    insight_client = FakeInsightClient()
-    insight_client.export_atif_session_result = {
-        "schema_version": "1.6",
-        "session_id": "runtime-1",
-        "agent": {"name": "Alpha", "version": "test"},
-        "steps": [],
-    }
-    facade = InsightFacade(
-        ServiceContainer(
-            repository=repo,
-            workspace_store=MagicMock(),
-            insight_client=insight_client,
-        ),
-    )
-
-    result = facade.export_atif_session("session-1")
-
-    assert insight_client.calls[-1] == ("export_atif_session", "runtime-1")
-    assert result["session_id"] == "session-1"
-    assert result["runtime_session_id"] == "runtime-1"
-
-
-def test_get_timeseries_filters_to_selected_managed_agent_sessions(
-    repo: SqliteRepository,
-) -> None:
-    from witty_service.application.insight_facade import InsightFacade
-
-    _create_agent(repo, "agent-1", "Alpha")
-    _create_agent(repo, "agent-2", "Beta")
-    _create_session(repo, agent_id="agent-1", session_id="session-1", runtime_session_id="runtime-1")
-    _create_session(repo, agent_id="agent-2", session_id="session-2", runtime_session_id="runtime-2")
-
-    insight_client = FakeInsightClient()
-    insight_client.timeseries_result = {
-        "token_series": [{"bucket_start_ns": 100, "input_tokens": 1, "output_tokens": 2, "total_tokens": 3}],
-        "model_series": [{"bucket_start_ns": 100, "model": "gpt-4o", "total_tokens": 3}],
-    }
-    facade = InsightFacade(
-        ServiceContainer(
-            repository=repo,
-            workspace_store=MagicMock(),
-            insight_client=insight_client,
-        ),
-    )
-
-    result = facade.get_timeseries(witty_agent_id="agent-1", start_ns=10, end_ns=20, buckets=5)
-
-    assert insight_client.calls[-1] == (
-        "get_timeseries",
-        {
-            "start_ns": 10,
-            "end_ns": 20,
-            "buckets": 5,
-            "session_id": "runtime-1",
-        },
-    )
-    assert result == insight_client.timeseries_result
-
-
-def test_get_interruption_session_counts_remaps_runtime_session_ids_to_witty_ids(
-    repo: SqliteRepository,
-) -> None:
-    from witty_service.application.insight_facade import InsightFacade
-
-    _create_agent(repo, "agent-1", "Alpha")
-    _create_session(repo, agent_id="agent-1", session_id="session-1", runtime_session_id="runtime-1")
-
-    insight_client = FakeInsightClient()
-    insight_client.interruption_session_counts_result = [
-        {
-            "session_id": "runtime-1",
-            "total": 2,
-            "by_severity": {"critical": 1, "high": 1, "medium": 0, "low": 0},
-            "types": [{"interruption_type": "agent_crash", "severity": "critical", "count": 1}],
-        },
-        {
-            "session_id": "heartbeat-runtime",
-            "total": 1,
-            "by_severity": {"critical": 0, "high": 1, "medium": 0, "low": 0},
-            "types": [{"interruption_type": "tool_hang", "severity": "high", "count": 1}],
-        },
-    ]
-    facade = InsightFacade(
-        ServiceContainer(
-            repository=repo,
-            workspace_store=MagicMock(),
-            insight_client=insight_client,
-        ),
-    )
-
-    result = facade.get_interruption_session_counts()
+    result = await facade.get_session_interruptions("session-1")
 
     assert result == [
         {
+            "interruption_id": "interrupt-1",
             "session_id": "session-1",
             "runtime_session_id": "runtime-1",
-            "total": 2,
-            "by_severity": {"critical": 1, "high": 1, "medium": 0, "low": 0},
-            "types": [{"interruption_type": "agent_crash", "severity": "critical", "count": 1}],
+            "severity": "critical",
         }
     ]
 
 
-def test_get_agent_health_joins_managed_agents_and_orphan_runtimes(
+@pytest.mark.asyncio
+async def test_get_timeseries_and_interruption_count_return_empty_without_managed_sessions(
     repo: SqliteRepository,
 ) -> None:
-    from witty_service.application.insight_facade import InsightFacade
+    facade = _make_facade(repo, FakeInsightHttpClient())
 
+    assert await facade.get_timeseries() == {"token_series": [], "model_series": []}
+    assert await facade.get_interruption_count() == {
+        "total": 0,
+        "by_severity": {"critical": 0, "high": 0, "medium": 0, "low": 0},
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("method_name", "args", "http_method", "path", "error", "expected_code"),
+    [
+        (
+            "get_trace_detail",
+            ("trace-1",),
+            "GET",
+            "/api/traces/trace-1",
+            httpx.ConnectError("boom"),
+            "INSIGHT_UNAVAILABLE",
+        ),
+        (
+            "resolve_interruption",
+            ("interrupt-1",),
+            "POST",
+            "/api/interruptions/interrupt-1/resolve",
+            httpx.ReadTimeout("slow"),
+            "INSIGHT_TIMEOUT",
+        ),
+        (
+            "delete_agent_health",
+            (101,),
+            "DELETE",
+            "/api/agent-health/101",
+            _http_status_error("DELETE", "/api/agent-health/101", 503),
+            "INSIGHT_UPSTREAM_ERROR",
+        ),
+        (
+            "restart_agent_health",
+            (101,),
+            "POST",
+            "/api/agent-health/101/restart",
+            ValueError("invalid json"),
+            "INSIGHT_BAD_RESPONSE",
+        ),
+    ],
+)
+async def test_insight_http_errors_are_mapped_to_domain_errors(
+    repo: SqliteRepository,
+    method_name: str,
+    args: tuple[Any, ...],
+    http_method: str,
+    path: str,
+    error: Exception,
+    expected_code: str,
+) -> None:
+    insight_http_client = FakeInsightHttpClient()
+    if http_method == "GET":
+        insight_http_client.get_errors[path] = error
+    elif http_method == "POST":
+        insight_http_client.post_errors[path] = error
+    else:
+        insight_http_client.delete_errors[path] = error
+
+    facade = _make_facade(repo, insight_http_client)
+
+    with pytest.raises(DomainError) as exc_info:
+        await getattr(facade, method_name)(*args)
+
+    assert exc_info.value.code == expected_code
+    assert exc_info.value.details["path"] == path
+    assert exc_info.value.details["base_url"] == "http://localhost:7396"
+
+
+@pytest.mark.asyncio
+async def test_export_atif_session_rewrites_session_identity(
+    repo: SqliteRepository,
+) -> None:
+    _create_agent(repo, "agent-1", "Alpha")
+    _create_session(repo, agent_id="agent-1", session_id="session-1", runtime_session_id="runtime-1")
+    insight_http_client = FakeInsightHttpClient()
+    insight_http_client.get_results["/api/export/atif/session/runtime-1"] = {
+        "schema_version": "1.6",
+        "session_id": "runtime-1",
+        "agent": {},
+        "steps": [],
+    }
+    facade = _make_facade(repo, insight_http_client)
+
+    result = await facade.export_atif_session("session-1")
+
+    assert result == {
+        "schema_version": "1.6",
+        "session_id": "session-1",
+        "runtime_session_id": "runtime-1",
+        "agent": {},
+        "steps": [],
+    }
+
+
+@pytest.mark.asyncio
+async def test_get_agent_health_joins_managed_agents_and_orphan_runtimes(
+    repo: SqliteRepository,
+) -> None:
     _create_agent(repo, "agent-1", "Alpha")
     _create_agent(repo, "agent-2", "Beta")
     repo.save_sandbox_state(
@@ -545,8 +409,8 @@ def test_get_agent_health_joins_managed_agents_and_orphan_runtimes(
         adapter_ready=False,
     )
 
-    insight_client = FakeInsightClient()
-    insight_client.agent_health_result = {
+    insight_http_client = FakeInsightHttpClient()
+    insight_http_client.get_results["/api/agent-health"] = {
         "agents": [
             {
                 "pid": 101,
@@ -573,15 +437,9 @@ def test_get_agent_health_joins_managed_agents_and_orphan_runtimes(
         ],
         "last_scan_time": 999,
     }
-    facade = InsightFacade(
-        ServiceContainer(
-            repository=repo,
-            workspace_store=MagicMock(),
-            insight_client=insight_client,
-        ),
-    )
+    facade = _make_facade(repo, insight_http_client)
 
-    result = facade.get_agent_health()
+    result = await facade.get_agent_health()
 
     assert result["last_scan_time"] == 999
     assert result["agents"] == [
