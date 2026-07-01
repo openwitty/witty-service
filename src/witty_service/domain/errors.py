@@ -12,6 +12,7 @@ INSIGHT_TIMEOUT = "INSIGHT_TIMEOUT"
 INSIGHT_UPSTREAM_ERROR = "INSIGHT_UPSTREAM_ERROR"
 INSIGHT_BAD_RESPONSE = "INSIGHT_BAD_RESPONSE"
 INSIGHT_SESSION_MAPPING_NOT_FOUND = "INSIGHT_SESSION_MAPPING_NOT_FOUND"
+SESSION_NOT_FOUND = "SESSION_NOT_FOUND"
 
 
 class DomainError(Exception):
@@ -188,4 +189,19 @@ def insight_session_mapping_not_found(
             "runtime_type": runtime_type,
             "runtime_session_id": runtime_session_id,
         },
+    )
+
+
+def session_not_found(
+    *,
+    session_id: str,
+    agent_id: str | None = None,
+) -> DomainError:
+    details = {"session_id": session_id}
+    if agent_id is not None:
+        details["agent_id"] = agent_id
+    return DomainError(
+        code=SESSION_NOT_FOUND,
+        message="Session was not found.",
+        details=details,
     )

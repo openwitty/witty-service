@@ -8,6 +8,7 @@ from uuid import NAMESPACE_URL, uuid4, uuid5
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
+from witty_service.domain.errors import session_not_found
 from witty_service.domain.enums import AgentStatus
 from witty_service.persistence.orm import (
     AgentORM,
@@ -600,7 +601,7 @@ class SqliteRepository:
         with self._session_factory() as session:
             row = session.get(SessionORM, session_id)
             if row is None:
-                raise KeyError(f"Session not found: {session_id}")
+                raise session_not_found(session_id=session_id)
 
             row.runtime_type = runtime_type
             row.runtime_session_id = runtime_session_id

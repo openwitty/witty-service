@@ -6,11 +6,10 @@ from typing import Protocol
 import httpx
 
 from witty_service.adapter.http_client import AdaptorHttpClient
-from witty_service.domain.errors import DomainError
+from witty_service.domain.errors import DomainError, SESSION_NOT_FOUND, session_not_found
 from witty_service.persistence.repositories import AgentRecord, SessionRecord
 
 AGENT_NOT_FOUND = "AGENT_NOT_FOUND"
-SESSION_NOT_FOUND = "SESSION_NOT_FOUND"
 SESSION_AGENT_MISMATCH = "SESSION_AGENT_MISMATCH"
 
 
@@ -64,11 +63,7 @@ class SessionManager:
         self._require_agent(agent_id)
         session = self._repository.get_session(session_id)
         if session is None:
-            raise DomainError(
-                code=SESSION_NOT_FOUND,
-                message="Session was not found.",
-                details={"agent_id": agent_id, "session_id": session_id},
-            )
+            raise session_not_found(session_id=session_id, agent_id=agent_id)
         if session.agent_id != agent_id:
             raise DomainError(
                 code=SESSION_AGENT_MISMATCH,
@@ -224,11 +219,7 @@ class SessionManager:
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code == 404:
                 self._repository.delete_session(session_id)
-                raise DomainError(
-                    code=SESSION_NOT_FOUND,
-                    message="Session was not found.",
-                    details={"agent_id": agent_id, "session_id": session_id},
-                ) from exc
+                raise session_not_found(session_id=session_id, agent_id=agent_id) from exc
             raise
         return self._repository.upsert_session(
             session_id=result["id"],

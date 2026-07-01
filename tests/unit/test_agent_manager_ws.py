@@ -476,6 +476,94 @@ def test_send_message_uses_websocket_and_syncs_runtime_session_identity():
     asyncio.run(run())
 
 
+def test_send_message_runtime_identity_sync_swallows_domain_error(caplog):
+    async def run() -> None:
+        manager, _, repository, _, _, ws_client_pool = _make_ws_manager()
+        agent, session = _bootstrap_running_agent_and_session(repository)
+
+        mock_ws_client = MockWebSocketClient(base_url="ws://adapter/test")
+        mock_ws_client.set_events([
+            InboundEvent(
+                type="session.runtime.changed",
+                session_id=session.id,
+                runtime_type="openclaw",
+                event_id="evt-1",
+                ts_ms=1000,
+                payload={
+                    "runtime_session_id": "runtime-session-1",
+                    "runtime_session_key": "agent:1:session:key-1",
+                },
+            ),
+            InboundEvent(
+                type="message.completed",
+                session_id=session.id,
+                runtime_type="openclaw",
+                event_id="evt-2",
+                ts_ms=2000,
+                payload={},
+            ),
+        ])
+
+        domain_error = DomainError(
+            code="SESSION_NOT_FOUND",
+            message="Session was not found.",
+            details={"session_id": session.id},
+        )
+
+        with patch.object(
+            ws_client_pool,
+            "get_client",
+            return_value=mock_ws_client,
+        ), patch.object(
+            manager._session_manager,
+            "update_session_runtime_identity",
+            side_effect=domain_error,
+        ):
+            with caplog.at_level("ERROR"):
+                events = await manager.send_message(agent.id, session.id, "hello from user")
+
+        assert [event["type"] for event in events["events"]] == ["message.completed"]
+        assert "failed to sync runtime session identity" in caplog.text
+        assert "SESSION_NOT_FOUND" in caplog.text
+
+    asyncio.run(run())
+
+
+def test_send_message_runtime_identity_sync_does_not_swallow_programming_error():
+    async def run() -> None:
+        manager, _, repository, _, _, ws_client_pool = _make_ws_manager()
+        agent, session = _bootstrap_running_agent_and_session(repository)
+
+        mock_ws_client = MockWebSocketClient(base_url="ws://adapter/test")
+        mock_ws_client.set_events([
+            InboundEvent(
+                type="session.runtime.changed",
+                session_id=session.id,
+                runtime_type="openclaw",
+                event_id="evt-1",
+                ts_ms=1000,
+                payload={
+                    "runtime_session_id": "runtime-session-1",
+                    "runtime_session_key": "agent:1:session:key-1",
+                },
+            ),
+        ])
+
+        with patch.object(
+            ws_client_pool,
+            "get_client",
+            return_value=mock_ws_client,
+        ), patch.object(
+            manager._session_manager,
+            "update_session_runtime_identity",
+            side_effect=TypeError("boom"),
+        ):
+            with pytest.raises(TypeError, match="boom"):
+                await manager.send_message(agent.id, session.id, "hello from user")
+
+    asyncio.run(run())
+
+
 @pytest.mark.skip(reason="sandbox health check 30 次循环导致单用例约 30 秒,源代码未修复前暂跳过")
 def test_send_message_via_websocket_client():
     """Test that send_message uses WebSocket client to send and receive messages"""

@@ -6,6 +6,7 @@ import pytest
 from sqlalchemy.orm import Session, sessionmaker
 
 from witty_service.domain.enums import AgentStatus
+from witty_service.domain.errors import DomainError
 from witty_service.persistence.db import (
     create_session_factory,
     create_sqlite_engine,
@@ -204,13 +205,16 @@ def test_update_session_runtime_identity_requires_existing_session(
 ) -> None:
     _create_agent(repo)
 
-    with pytest.raises(KeyError, match="Session not found: missing-session"):
+    with pytest.raises(DomainError) as exc_info:
         repo.update_session_runtime_identity(
             session_id="missing-session",
             runtime_type="openclaw",
             runtime_session_id="runtime-session-1",
             runtime_session_key="agent:agent-1:session:missing-session",
         )
+
+    assert exc_info.value.code == "SESSION_NOT_FOUND"
+    assert exc_info.value.details["session_id"] == "missing-session"
 
 
 def test_find_session_by_runtime_identity_returns_match(

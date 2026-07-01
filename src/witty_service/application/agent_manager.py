@@ -1924,14 +1924,15 @@ class AgentManager:
                 runtime_session_id=runtime_session_id,
                 runtime_session_key=runtime_session_key,
             )
-        except Exception:
+        except DomainError as exc:
             self._logger.exception(
                 "failed to sync runtime session identity: "
-                "agent_id=%s session_id=%s runtime_type=%s runtime_session_id=%s",
+                "agent_id=%s session_id=%s runtime_type=%s runtime_session_id=%s error_code=%s",
                 agent_id,
                 session_id,
                 runtime_type,
                 runtime_session_id,
+                exc.code,
             )
 
     def _should_filter_session_event(self, event: dict[str, Any]) -> bool:
