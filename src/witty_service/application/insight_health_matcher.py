@@ -29,11 +29,17 @@ class HealthMatcher:
         if not port_candidates:
             return []
 
-        return [
+        matched_runtimes = [
             runtime
             for runtime in runtimes
             if any(port in runtime.get("ports", []) for port in port_candidates)
         ]
+        live_runtimes = [runtime for runtime in matched_runtimes if not self._is_offline(runtime)]
+        if live_runtimes:
+            return live_runtimes
+        if not matched_runtimes:
+            return []
+        return [max(matched_runtimes, key=self._runtime_recency_key)]
 
     def build_managed_health_entry(
         self,
@@ -54,6 +60,7 @@ class HealthMatcher:
         adapter_status: str | None = None
         if runtime_state is not None:
             adapter_status = "ready" if runtime_state.adapter_ready else "not_ready"
+        candidate_runtimes = candidates if len(candidates) > 1 else []
 
         return {
             "witty_agent_id": agent.id,
@@ -73,7 +80,7 @@ class HealthMatcher:
             "adapter_pid": None if matched_runtime is None else matched_runtime.get("pid"),
             "stderr_log_path": stderr_log_path if isinstance(stderr_log_path, str) else None,
             "runtime": matched_runtime,
-            "candidate_runtimes": candidates,
+            "candidate_runtimes": candidate_runtimes,
         }
 
     @staticmethod
@@ -126,3 +133,12 @@ class HealthMatcher:
     @staticmethod
     def _int_or_none(value: Any) -> int | None:
         return value if isinstance(value, int) else None
+
+    @staticmethod
+    def _is_offline(runtime: dict[str, Any]) -> bool:
+        return str(runtime.get("status") or "").lower() == "offline"
+
+    @staticmethod
+    def _runtime_recency_key(runtime: dict[str, Any]) -> int:
+        last_check_time = runtime.get("last_check_time")
+        return last_check_time if isinstance(last_check_time, int) else 0

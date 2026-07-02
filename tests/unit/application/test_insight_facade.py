@@ -491,19 +491,7 @@ async def test_get_agent_health_joins_managed_agents_and_orphan_runtimes(
                 "latency_ms": 12,
                 "error_message": None,
             },
-            "candidate_runtimes": [
-                {
-                    "pid": 101,
-                    "agent_name": "raw-alpha",
-                    "category": "openclaw",
-                    "exe_path": "/usr/bin/openclaw",
-                    "ports": [18080],
-                    "status": "healthy",
-                    "last_check_time": 111,
-                    "latency_ms": 12,
-                    "error_message": None,
-                }
-            ],
+            "candidate_runtimes": [],
         },
         {
             "witty_agent_id": "agent-2",
@@ -539,3 +527,69 @@ async def test_get_agent_health_joins_managed_agents_and_orphan_runtimes(
             "error_message": "exited",
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_get_agent_health_prefers_live_runtime_over_stale_offline_matches(
+    repo: SqliteRepository,
+) -> None:
+    _create_agent(repo, "agent-1", "Alpha")
+    repo.save_sandbox_state(
+        "agent-1",
+        sandbox_payload_json={
+            "sandbox_id": "sandbox-1",
+            "workspace_path": "/tmp/agent-1",
+            "metadata": {"gateway_port": 18080, "stderr_log_path": "/tmp/alpha.err"},
+        },
+        adapter_base_url="http://127.0.0.1:18080",
+        adapter_ready=True,
+    )
+
+    insight_http_client = FakeInsightHttpClient()
+    insight_http_client.get_results["/api/agent-health"] = {
+        "agents": [
+            {
+                "pid": 101,
+                "agent_name": "raw-alpha-live",
+                "category": "openclaw",
+                "exe_path": "/usr/bin/openclaw",
+                "ports": [18080],
+                "status": "healthy",
+                "last_check_time": 300,
+                "latency_ms": 8,
+                "error_message": None,
+            },
+            {
+                "pid": 99,
+                "agent_name": "raw-alpha-old",
+                "category": "openclaw",
+                "exe_path": "/usr/bin/openclaw",
+                "ports": [18080],
+                "status": "offline",
+                "last_check_time": 200,
+                "latency_ms": None,
+                "error_message": "exited",
+            },
+        ],
+        "last_scan_time": 1234,
+    }
+    facade = _make_facade(repo, insight_http_client)
+
+    result = await facade.get_agent_health()
+    agent = result["agents"][0]
+
+    assert agent["overall_status"] == "healthy"
+    assert agent["status_reason"] is None
+    assert agent["adapter_pid"] == 101
+    assert agent["runtime"] == {
+        "pid": 101,
+        "agent_name": "raw-alpha-live",
+        "category": "openclaw",
+        "exe_path": "/usr/bin/openclaw",
+        "ports": [18080],
+        "status": "healthy",
+        "last_check_time": 300,
+        "latency_ms": 8,
+        "error_message": None,
+    }
+    assert agent["candidate_runtimes"] == []
