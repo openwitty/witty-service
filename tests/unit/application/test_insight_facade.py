@@ -122,6 +122,23 @@ def _make_facade(
     )
 
 
+def test_raw_params_uses_bracketed_session_ids_for_multiple_runtime_sessions() -> None:
+    from witty_service.application.insight_facade import InsightFacade
+
+    assert InsightFacade._raw_params(session_ids=["runtime-1", "runtime-2"]) == [
+        ("session_ids[]", "runtime-1"),
+        ("session_ids[]", "runtime-2"),
+    ]
+
+
+def test_raw_params_keeps_singular_session_id_for_single_runtime_session() -> None:
+    from witty_service.application.insight_facade import InsightFacade
+
+    assert InsightFacade._raw_params(session_ids=["runtime-1"]) == {
+        "session_id": "runtime-1",
+    }
+
+
 @pytest.mark.asyncio
 async def test_get_capabilities_reports_unreachable_when_health_probe_fails(
     repo: SqliteRepository,
@@ -195,7 +212,10 @@ async def test_list_sessions_enriches_managed_sessions_and_warns_for_missing_lin
     assert insight_http_client.calls[-1] == (
         "GET",
         "/api/sessions",
-        {"session_ids": ["runtime-1", "runtime-2"]},
+        [
+            ("session_ids[]", "runtime-1"),
+            ("session_ids[]", "runtime-2"),
+        ],
     )
     assert result == [
         {

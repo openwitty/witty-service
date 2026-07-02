@@ -5,6 +5,9 @@ from typing import Any
 import httpx
 
 
+QueryParams = dict[str, Any] | list[tuple[str, Any]]
+
+
 class AdaptorHttpClient:
     """Async HTTP client shared by runtime adaptor and insight upstream calls."""
 
@@ -38,7 +41,7 @@ class AdaptorHttpClient:
         method: str,
         path: str,
         *,
-        params: dict[str, Any] | None = None,
+        params: QueryParams | None = None,
         json: Any = None,
         timeout: float | None = None,
     ) -> httpx.Response:
@@ -58,7 +61,7 @@ class AdaptorHttpClient:
         method: str,
         path: str,
         *,
-        params: dict[str, Any] | None = None,
+        params: QueryParams | None = None,
         json: Any = None,
         timeout: float | None = None,
     ) -> Any:
@@ -84,7 +87,7 @@ class AdaptorHttpClient:
     async def get(
         self,
         path: str,
-        params: dict[str, Any] | None = None,
+        params: QueryParams | None = None,
     ) -> Any:
         return await self._request_json("GET", path, params=params)
 

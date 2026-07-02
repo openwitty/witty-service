@@ -473,7 +473,7 @@ class InsightFacade:
         end_ns: int | None = None,
         buckets: int | None = None,
         session_ids: list[str] | None = None,
-    ) -> dict[str, Any]:
+    ) -> dict[str, Any] | list[tuple[str, Any]]:
         params: dict[str, Any] = {}
         if start_ns is not None:
             params["start_ns"] = start_ns
@@ -485,7 +485,9 @@ class InsightFacade:
             if len(session_ids) == 1:
                 params["session_id"] = session_ids[0]
             else:
-                params["session_ids"] = session_ids
+                multi_params: list[tuple[str, Any]] = list(params.items())
+                multi_params.extend(("session_ids[]", session_id) for session_id in session_ids)
+                return multi_params
         return params
 
     def _require_runtime_session(self, witty_session_id: str) -> SessionRecord:
