@@ -17,7 +17,7 @@ import json
 from datetime import datetime, timezone
 
 import pytest
-from sqlalchemy import create_engine, select
+from sqlalchemy import UniqueConstraint, create_engine, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -129,6 +129,22 @@ def test_base_metadata_contains_all_tables() -> None:
     assert set(Base.metadata.tables.keys()) >= expected
 
 
+def test_session_table_schema_includes_runtime_identity_columns() -> None:
+    table = Base.metadata.tables["sessions"]
+
+    assert {"runtime_type", "runtime_session_id", "runtime_session_key"} <= set(
+        table.columns.keys()
+    )
+
+    unique_names = {
+        constraint.name
+        for constraint in table.constraints
+        if isinstance(constraint, UniqueConstraint)
+    }
+    assert "uq_sessions_runtime_type_session_id" in unique_names
+    assert "uq_sessions_runtime_type_session_key" in unique_names
+
+
 # ---------------------------------------------------------------------------
 # AgentORM
 # ---------------------------------------------------------------------------
@@ -238,6 +254,50 @@ def test_session_orm_defaults(session: Session) -> None:
     assert fetched.title is None
     assert fetched.pinned is False
     assert fetched.remote_runtime_agent_id is None
+    assert fetched.runtime_type is None
+    assert fetched.runtime_session_id is None
+    assert fetched.runtime_session_key is None
+
+
+def test_session_orm_runtime_identity_uniqueness(session: Session) -> None:
+    session.add_all([_new_agent("agent-1"), _new_agent("agent-2")])
+    session.commit()
+    session.add(
+        SessionORM(
+            id="sess-1",
+            agent_id="agent-1",
+            runtime_type="openclaw",
+            runtime_session_id="runtime-1",
+            runtime_session_key="agent:agent-1:session:sess-1",
+        )
+    )
+    session.commit()
+
+    session.add(
+        SessionORM(
+            id="sess-2",
+            agent_id="agent-2",
+            runtime_type="openclaw",
+            runtime_session_id="runtime-1",
+            runtime_session_key="agent:agent-2:session:sess-2",
+        )
+    )
+    with pytest.raises(IntegrityError):
+        session.commit()
+    session.rollback()
+
+    session.add(
+        SessionORM(
+            id="sess-3",
+            agent_id="agent-2",
+            runtime_type="openclaw",
+            runtime_session_id="runtime-3",
+            runtime_session_key="agent:agent-1:session:sess-1",
+        )
+    )
+    with pytest.raises(IntegrityError):
+        session.commit()
+    session.rollback()
 
 
 def test_session_orm_enum_persists_as_string(session: Session) -> None:

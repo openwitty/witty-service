@@ -273,6 +273,46 @@ Witty-Service 通过环境变量进行配置，无需额外配置文件。
 | `AUTH_TOKEN` | API 认证 Token | `dev-token` |
 | `WITTY_AGENT_SERVER_APP_DIR` | Local Process 模式下 witty-agent-server 代码目录 | 空 |
 
+### Witty Insight 集成配置
+
+| 环境变量 | 说明 | 默认值 |
+|----------|------|--------|
+| `WITTY_INSIGHT_ENABLED` | 是否启用 witty-insight 集成 | `true` |
+| `WITTY_INSIGHT_BASE_URL` | witty-insight API 地址 | `http://127.0.0.1:7396` |
+| `WITTY_INSIGHT_TIMEOUT_SECONDS` | witty-insight 请求超时（秒） | `10` |
+| `WITTY_INSIGHT_BEARER_TOKEN` | 调用 witty-insight 时附带的 Bearer Token（可选） | 空 |
+
+默认推荐同机部署并通过 `127.0.0.1` 连接 `witty-insight`。`witty-service`
+默认启用 Insight 集成；如果上游 `witty-insight` 当前未启动，`witty-service`
+仍可正常启动。若需关闭该集成，可显式设置 `WITTY_INSIGHT_ENABLED=false`。
+修改上述环境变量后，需要重启 `witty-service` 进程才能生效。
+
+同机部署示例：
+
+```bash
+export WITTY_INSIGHT_BASE_URL=http://127.0.0.1:7396
+export WITTY_INSIGHT_TIMEOUT_SECONDS=10
+
+witty-service --host 0.0.0.0 --port 8000
+```
+
+分开部署示例：
+
+```bash
+export WITTY_INSIGHT_BASE_URL=http://10.0.0.8:7396
+export WITTY_INSIGHT_TIMEOUT_SECONDS=10
+
+witty-service --host 0.0.0.0 --port 8000
+```
+
+显式关闭 Insight 集成：
+
+```bash
+export WITTY_INSIGHT_ENABLED=false
+
+witty-service --host 0.0.0.0 --port 8000
+```
+
 ### Docker 沙箱配置
 
 | 环境变量 | 说明 | 默认值 |

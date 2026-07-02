@@ -6,6 +6,7 @@ import pytest
 from sqlalchemy.orm import Session, sessionmaker
 
 from witty_service.domain.enums import AgentStatus
+from witty_service.domain.errors import DomainError
 from witty_service.persistence.db import (
     create_session_factory,
     create_sqlite_engine,
@@ -17,6 +18,7 @@ from witty_service.persistence.orm import (
     MessageStatus,
 )
 from witty_service.persistence.repositories import (
+    AgentWithRuntimeStateRecord,
     SkillRecord,
     SqliteRepository,
 )
@@ -68,6 +70,7 @@ def _create_session(
         agent_id=agent_id,
         status="idle",
         runtime_type="openclaw",
+        runtime_session_key=f"agent:{agent_id}:session:{session_id}",
         remote_runtime_agent_id="runtime-agent-1",
     )
 
@@ -122,6 +125,7 @@ def test_session_upsert_list_update_and_delete(repo: SqliteRepository) -> None:
         session_id="session-1",
         agent_id="agent-1",
         status="running",
+        runtime_type="openclaw",
         remote_runtime_agent_id=None,
     )
     metadata = repo.update_session_metadata(
@@ -131,7 +135,11 @@ def test_session_upsert_list_update_and_delete(repo: SqliteRepository) -> None:
     )
 
     assert created is not None
+    assert created.runtime_type == "openclaw"
+    assert created.runtime_session_key == "agent:agent-1:session:session-1"
+    assert created.runtime_session_id is None
     assert updated.status == "running"
+    assert updated.runtime_type == "openclaw"
     assert updated.remote_runtime_agent_id == "runtime-agent-1"
     assert metadata.title == "Important chat"
     assert metadata.pinned is True
@@ -162,6 +170,219 @@ def test_sandbox_state_round_trip_and_handle(repo: SqliteRepository) -> None:
     assert fetched.handle.sandbox_id == "sandbox-1"
     assert fetched.handle.workspace_path == "/tmp/agent-1"
     assert fetched.handle.metadata == {"port": 18080}
+
+
+def test_update_session_runtime_identity_persists_and_overwrites(
+    repo: SqliteRepository,
+) -> None:
+    _create_agent(repo)
+    _create_session(repo, session_id="session-1")
+
+    created = repo.update_session_runtime_identity(
+        session_id="session-1",
+        runtime_type="openclaw",
+        runtime_session_id="runtime-session-1",
+        runtime_session_key="agent:agent-1:session:session-1",
+    )
+    updated = repo.update_session_runtime_identity(
+        session_id="session-1",
+        runtime_type="openclaw",
+        runtime_session_id="runtime-session-2",
+        runtime_session_key="agent:agent-1:session:session-1",
+    )
+
+    assert created.runtime_type == "openclaw"
+    assert created.runtime_session_id == "runtime-session-1"
+    assert created.runtime_session_key == "agent:agent-1:session:session-1"
+    assert updated.id == created.id
+    assert updated.runtime_type == "openclaw"
+    assert updated.runtime_session_id == "runtime-session-2"
+    assert updated.runtime_session_key == "agent:agent-1:session:session-1"
+
+
+def test_update_session_runtime_identity_requires_existing_session(
+    repo: SqliteRepository,
+) -> None:
+    _create_agent(repo)
+
+    with pytest.raises(DomainError) as exc_info:
+        repo.update_session_runtime_identity(
+            session_id="missing-session",
+            runtime_type="openclaw",
+            runtime_session_id="runtime-session-1",
+            runtime_session_key="agent:agent-1:session:missing-session",
+        )
+
+    assert exc_info.value.code == "SESSION_NOT_FOUND"
+    assert exc_info.value.details["session_id"] == "missing-session"
+
+
+def test_find_session_by_runtime_identity_returns_match(
+    repo: SqliteRepository,
+) -> None:
+    _create_agent(repo)
+    _create_session(repo, session_id="session-1")
+    repo.update_session_runtime_identity(
+        session_id="session-1",
+        runtime_type="openclaw",
+        runtime_session_id="runtime-session-1",
+        runtime_session_key="agent:agent-1:session:session-1",
+    )
+
+    result = repo.find_session_by_runtime_identity(
+        runtime_type="openclaw",
+        runtime_session_id="runtime-session-1",
+    )
+
+    assert result is not None
+    assert result.id == "session-1"
+    assert result.agent_id == "agent-1"
+
+
+def test_find_session_by_runtime_identity_returns_none_when_missing(
+    repo: SqliteRepository,
+) -> None:
+    _create_agent(repo)
+    _create_session(repo, session_id="session-1")
+
+    result = repo.find_session_by_runtime_identity(
+        runtime_type="openclaw",
+        runtime_session_id="missing-runtime-session",
+    )
+
+    assert result is None
+
+
+def test_list_sessions_by_runtime_session_ids_preserves_input_order(
+    repo: SqliteRepository,
+) -> None:
+    _create_agent(repo)
+    _create_session(repo, session_id="session-1")
+    _create_session(repo, session_id="session-2")
+    repo.update_session_runtime_identity(
+        session_id="session-1",
+        runtime_type="openclaw",
+        runtime_session_id="runtime-session-1",
+        runtime_session_key="agent:agent-1:session:session-1",
+    )
+    repo.update_session_runtime_identity(
+        session_id="session-2",
+        runtime_type="openclaw",
+        runtime_session_id="runtime-session-2",
+        runtime_session_key="agent:agent-1:session:session-2",
+    )
+
+    result = repo.list_sessions_by_runtime_session_ids(
+        runtime_type="openclaw",
+        runtime_session_ids=[
+            "runtime-session-2",
+            "runtime-session-1",
+            "runtime-session-2",
+        ],
+    )
+
+    assert [item.id for item in result] == ["session-2", "session-1"]
+
+
+def test_list_sessions_by_runtime_session_ids_ignores_missing_and_empty(
+    repo: SqliteRepository,
+) -> None:
+    _create_agent(repo)
+    _create_session(repo, session_id="session-1")
+    repo.update_session_runtime_identity(
+        session_id="session-1",
+        runtime_type="openclaw",
+        runtime_session_id="runtime-session-1",
+        runtime_session_key="agent:agent-1:session:session-1",
+    )
+
+    assert (
+        repo.list_sessions_by_runtime_session_ids(
+            runtime_type="openclaw",
+            runtime_session_ids=[],
+        )
+        == []
+    )
+
+    result = repo.list_sessions_by_runtime_session_ids(
+        runtime_type="openclaw",
+        runtime_session_ids=["missing", "runtime-session-1"],
+    )
+
+    assert [item.id for item in result] == ["session-1"]
+
+
+def test_list_runtime_session_ids_by_agent_id_filters_runtime_type_and_nulls(
+    repo: SqliteRepository,
+) -> None:
+    _create_agent(repo, "agent-1")
+    _create_session(repo, agent_id="agent-1", session_id="session-1")
+    _create_session(repo, agent_id="agent-1", session_id="session-2")
+    _create_session(repo, agent_id="agent-1", session_id="session-3")
+    repo.update_session_runtime_identity(
+        session_id="session-1",
+        runtime_type="openclaw",
+        runtime_session_id="runtime-session-1",
+        runtime_session_key="agent:agent-1:session:session-1",
+    )
+    repo.update_session_runtime_identity(
+        session_id="session-3",
+        runtime_type="other-runtime",
+        runtime_session_id="other-runtime-session",
+        runtime_session_key="agent:agent-1:session:session-3",
+    )
+
+    result = repo.list_runtime_session_ids_by_agent_id("agent-1")
+
+    assert result == ["runtime-session-1"]
+
+
+def test_list_agents_with_runtime_state_returns_outer_joined_records(
+    repo: SqliteRepository,
+) -> None:
+    _create_agent(repo, "agent-1")
+    _create_agent(repo, "agent-2")
+    repo.save_sandbox_state(
+        agent_id="agent-1",
+        sandbox_payload_json={
+            "sandbox_id": "sandbox-1",
+            "workspace_path": "/tmp/agent-1",
+            "metadata": {"port": 18080},
+        },
+        adapter_base_url="http://127.0.0.1:18080",
+        adapter_ready=True,
+    )
+
+    result = repo.list_agents_with_runtime_state()
+
+    assert all(isinstance(item, AgentWithRuntimeStateRecord) for item in result)
+    assert [item.agent.id for item in result] == ["agent-1", "agent-2"]
+    assert result[0].runtime_state is not None
+    assert result[0].runtime_state.adapter_base_url == "http://127.0.0.1:18080"
+    assert result[1].runtime_state is None
+
+
+def test_list_agent_records_by_ids_preserves_input_order(
+    repo: SqliteRepository,
+) -> None:
+    _create_agent(repo, "agent-1")
+    _create_agent(repo, "agent-2")
+    repo.create_agent_with_id(
+        agent_id="agent-3",
+        name="Deleted Agent",
+        description="demo",
+        sandbox_type="local_process",
+        adapter_type="http",
+        workspace_path="/tmp/agent-3",
+        idle_timeout_seconds=300,
+        status=AgentStatus.deleted,
+    )
+
+    result = repo.list_agent_records_by_ids(
+        ["agent-2", "missing-agent", "agent-1", "agent-2", "agent-3"]
+    )
+
+    assert [item.id for item in result] == ["agent-2", "agent-1"]
 
 
 def test_message_events_retry_and_summary_methods(

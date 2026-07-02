@@ -1,241 +1,153 @@
-import asyncio
+from __future__ import annotations
+
+from typing import Any
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import httpx
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+
 from witty_service.adapter.http_client import AdaptorHttpClient
 
 
-def test_client_initialization():
-    """测试客户端初始化"""
-    client = AdaptorHttpClient(base_url="http://localhost:8080")
+@pytest.fixture()
+def client() -> AdaptorHttpClient:
+    return AdaptorHttpClient(
+        base_url="http://localhost:8080/",
+        timeout=5.0,
+        default_headers={"Authorization": "Bearer secret-token"},
+    )
+
+
+def test_client_initialization_stores_base_configuration(client: AdaptorHttpClient) -> None:
     assert client.base_url == "http://localhost:8080"
+    assert client._timeout == 5.0
+    assert client._default_headers == {"Authorization": "Bearer secret-token"}
     assert client._client is None
 
 
-def test_client_strips_trailing_slash():
-    """测试 base_url 末尾斜杠被移除"""
-    client = AdaptorHttpClient(base_url="http://localhost:8080/")
-    assert client.base_url == "http://localhost:8080"
+@pytest.mark.asyncio
+async def test_get_client_creates_async_client_with_default_headers(
+    client: AdaptorHttpClient,
+) -> None:
+    with patch("witty_service.adapter.http_client.httpx.AsyncClient") as client_class:
+        client_instance = AsyncMock()
+        client_class.return_value = client_instance
+
+        result = await client._get_client()
+
+    client_class.assert_called_once_with(
+        base_url="http://localhost:8080",
+        timeout=5.0,
+        headers={"Authorization": "Bearer secret-token"},
+    )
+    assert result is client_instance
 
 
-def test_get_client_creates_client_on_first_call():
-    """测试 _get_client 在首次调用时创建客户端"""
-    async def run() -> None:
-        client = AdaptorHttpClient(base_url="http://localhost:8080")
-        with patch("httpx.AsyncClient") as mock_client_class:
-            mock_client_instance = AsyncMock()
-            mock_client_class.return_value = mock_client_instance
+@pytest.mark.asyncio
+async def test_request_uses_single_request_entrypoint(client: AdaptorHttpClient) -> None:
+    request_client = AsyncMock()
+    response = MagicMock()
+    request_client.request.return_value = response
+    client._client = request_client
 
-            result = await client._get_client()
+    result = await client._request(
+        "POST",
+        "/api/test",
+        params={"page": 1},
+        json={"message": "hello"},
+        timeout=9.0,
+    )
 
-            mock_client_class.assert_called_once_with(
-                base_url="http://localhost:8080", timeout=30.0
-            )
-            assert result == mock_client_instance
-            assert client._client is mock_client_instance
-
-    asyncio.run(run())
-
-
-def test_get_client_returns_same_client_on_subsequent_calls():
-    """测试 _get_client 在后续调用时返回相同客户端"""
-    async def run() -> None:
-        client = AdaptorHttpClient(base_url="http://localhost:8080")
-        with patch("httpx.AsyncClient") as mock_client_class:
-            mock_client_instance = AsyncMock()
-            mock_client_class.return_value = mock_client_instance
-
-            result1 = await client._get_client()
-            result2 = await client._get_client()
-
-            assert result1 == result2
-            mock_client_class.assert_called_once()
-
-    asyncio.run(run())
+    request_client.request.assert_called_once_with(
+        "POST",
+        "/api/test",
+        params={"page": 1},
+        json={"message": "hello"},
+        timeout=9.0,
+    )
+    response.raise_for_status.assert_called_once_with()
+    assert result is response
 
 
-def test_close_closes_client():
-    """测试 close 方法关闭客户端"""
-    async def run() -> None:
-        client = AdaptorHttpClient(base_url="http://localhost:8080")
-        mock_client = AsyncMock()
-        client._client = mock_client
+@pytest.mark.asyncio
+async def test_request_json_returns_parsed_payload(client: AdaptorHttpClient) -> None:
+    request_client = AsyncMock()
+    response = MagicMock()
+    response.json.return_value = {"ok": True}
+    request_client.request.return_value = response
+    client._client = request_client
 
-        await client.close()
+    result = await client._request_json("GET", "/api/test", params={"scope": "all"})
 
-        mock_client.aclose.assert_called_once()
-        assert client._client is None
-
-    asyncio.run(run())
-
-
-def test_close_does_nothing_when_client_is_none():
-    """测试 close 在客户端为 None 时不执行操作"""
-    async def run() -> None:
-        client = AdaptorHttpClient(base_url="http://localhost:8080")
-        assert client._client is None
-
-        await client.close()
-
-        assert client._client is None
-
-    asyncio.run(run())
+    assert result == {"ok": True}
+    request_client.request.assert_called_once_with(
+        "GET",
+        "/api/test",
+        params={"scope": "all"},
+        json=None,
+        timeout=None,
+    )
 
 
-def test_post_success():
-    """测试 POST 请求成功"""
-    async def run() -> None:
-        client = AdaptorHttpClient(base_url="http://localhost:8080")
-        mock_client = AsyncMock()
-        mock_response = MagicMock()
-        mock_response.json.return_value = {"status": "ok"}
-        mock_client.post.return_value = mock_response
-        client._client = mock_client
+@pytest.mark.asyncio
+async def test_get_post_and_delete_delegate_to_request_json(client: AdaptorHttpClient) -> None:
+    with patch.object(client, "_request_json", new=AsyncMock(side_effect=[{"a": 1}, {"b": 2}, {"c": 3}])) as request_json:
+        get_result = await client.get("/api/items", params={"page": 1})
+        post_result = await client.post("/api/items", json={"name": "test"}, timeout=10.0)
+        delete_result = await client.delete("/api/items/1")
 
-        result = await client.post("/api/test", json={"key": "value"})
-
-        mock_client.post.assert_called_once_with("/api/test", json={"key": "value"}, timeout=None)
-        mock_response.raise_for_status.assert_called_once()
-        assert result == {"status": "ok"}
-
-    asyncio.run(run())
+    assert get_result == {"a": 1}
+    assert post_result == {"b": 2}
+    assert delete_result == {"c": 3}
+    assert request_json.await_args_list == [
+        (( "GET", "/api/items"), {"params": {"page": 1}}),
+        (( "POST", "/api/items"), {"json": {"name": "test"}, "timeout": 10.0}),
+        (( "DELETE", "/api/items/1"), {}),
+    ]
 
 
-def test_post_raises_on_error():
-    """测试 POST 请求失败时抛出异常"""
-    async def run() -> None:
-        client = AdaptorHttpClient(base_url="http://localhost:8080")
-        mock_client = AsyncMock()
-        mock_response = MagicMock()
-        mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
-            "error", request=MagicMock(), response=MagicMock()
-        )
-        mock_client.post.return_value = mock_response
-        client._client = mock_client
+@pytest.mark.asyncio
+async def test_list_agents_uses_existing_runtime_endpoint(client: AdaptorHttpClient) -> None:
+    with patch.object(client, "get", new=AsyncMock(return_value={"agents": []})) as get:
+        result = await client.list_agents()
 
-        with pytest.raises(httpx.HTTPStatusError):
-            await client.post("/api/test")
-
-    asyncio.run(run())
+    assert result == {"agents": []}
+    get.assert_awaited_once_with("/agent/list")
 
 
-def test_get_success():
-    """测试 GET 请求成功"""
-    async def run() -> None:
-        client = AdaptorHttpClient(base_url="http://localhost:8080")
-        mock_client = AsyncMock()
-        mock_response = MagicMock()
-        mock_response.json.return_value = {"data": "test"}
-        mock_client.get.return_value = mock_response
-        client._client = mock_client
-
-        result = await client.get("/api/test", params={"key": "value"})
-
-        mock_client.get.assert_called_once_with("/api/test", params={"key": "value"})
-        mock_response.raise_for_status.assert_called_once()
-        assert result == {"data": "test"}
-
-    asyncio.run(run())
-
-
-def test_get_raises_on_error():
-    """测试 GET 请求失败时抛出异常"""
-    async def run() -> None:
-        client = AdaptorHttpClient(base_url="http://localhost:8080")
-        mock_client = AsyncMock()
-        mock_response = MagicMock()
-        mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
-            "error", request=MagicMock(), response=MagicMock()
-        )
-        mock_client.get.return_value = mock_response
-        client._client = mock_client
-
-        with pytest.raises(httpx.HTTPStatusError):
-            await client.get("/api/test")
-
-    asyncio.run(run())
-
-
-def test_delete_success():
-    """测试 DELETE 请求成功"""
-    async def run() -> None:
-        client = AdaptorHttpClient(base_url="http://localhost:8080")
-        mock_client = AsyncMock()
-        mock_response = MagicMock()
-        mock_client.delete.return_value = mock_response
-        client._client = mock_client
-
-        await client.delete("/api/test/1")
-
-        mock_client.delete.assert_called_once_with("/api/test/1")
-        mock_response.raise_for_status.assert_called_once()
-
-    asyncio.run(run())
-
-
-def test_delete_raises_on_error():
-    """测试 DELETE 请求失败时抛出异常"""
-    async def run() -> None:
-        client = AdaptorHttpClient(base_url="http://localhost:8080")
-        mock_client = AsyncMock()
-        mock_response = MagicMock()
-        mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
-            "error", request=MagicMock(), response=MagicMock()
-        )
-        mock_client.delete.return_value = mock_response
-        client._client = mock_client
-
-        with pytest.raises(httpx.HTTPStatusError):
-            await client.delete("/api/test/1")
-
-    asyncio.run(run())
-
-
-def test_health_check_success():
-    """测试健康检查成功"""
-    async def run() -> None:
-        client = AdaptorHttpClient(base_url="http://localhost:8080")
-        mock_client = AsyncMock()
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_client.get.return_value = mock_response
-        client._client = mock_client
-
+@pytest.mark.asyncio
+async def test_health_check_returns_true_for_200(client: AdaptorHttpClient) -> None:
+    response = MagicMock(status_code=200)
+    with patch.object(client, "_request", new=AsyncMock(return_value=response)) as request:
         result = await client.health_check()
 
-        mock_client.get.assert_called_once_with("/ping")
-        assert result is True
-
-    asyncio.run(run())
+    assert result is True
+    request.assert_awaited_once_with("GET", "/ping")
 
 
-def test_health_check_failure():
-    """测试健康检查失败（状态码非200）"""
-    async def run() -> None:
-        client = AdaptorHttpClient(base_url="http://localhost:8080")
-        mock_client = AsyncMock()
-        mock_response = MagicMock()
-        mock_response.status_code = 500
-        mock_client.get.return_value = mock_response
-        client._client = mock_client
-
+@pytest.mark.asyncio
+async def test_health_check_returns_false_for_non_200(client: AdaptorHttpClient) -> None:
+    response = MagicMock(status_code=503)
+    with patch.object(client, "_request", new=AsyncMock(return_value=response)):
         result = await client.health_check()
 
-        assert result is False
-
-    asyncio.run(run())
+    assert result is False
 
 
-def test_health_check_exception():
-    """测试健康检查异常时返回 False"""
-    async def run() -> None:
-        client = AdaptorHttpClient(base_url="http://localhost:8080")
-        mock_client = AsyncMock()
-        mock_client.get.side_effect = Exception("Connection error")
-        client._client = mock_client
-
+@pytest.mark.asyncio
+async def test_health_check_returns_false_for_transport_error(client: AdaptorHttpClient) -> None:
+    with patch.object(client, "_request", new=AsyncMock(side_effect=httpx.ConnectError("boom"))):
         result = await client.health_check()
 
-        assert result is False
+    assert result is False
 
-    asyncio.run(run())
+
+@pytest.mark.asyncio
+async def test_close_closes_client_and_resets_instance(client: AdaptorHttpClient) -> None:
+    request_client = AsyncMock()
+    client._client = request_client
+
+    await client.close()
+
+    request_client.aclose.assert_awaited_once_with()
+    assert client._client is None

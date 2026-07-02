@@ -89,6 +89,18 @@ class AgentRuntimeStateORM(Base):
 
 class SessionORM(Base):
     __tablename__ = "sessions"
+    __table_args__ = (
+        UniqueConstraint(
+            "runtime_type",
+            "runtime_session_key",
+            name="uq_sessions_runtime_type_session_key",
+        ),
+        UniqueConstraint(
+            "runtime_type",
+            "runtime_session_id",
+            name="uq_sessions_runtime_type_session_id",
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     agent_id: Mapped[str] = mapped_column(
@@ -98,6 +110,9 @@ class SessionORM(Base):
         index=True,
     )
     remote_runtime_agent_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    runtime_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    runtime_session_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    runtime_session_key: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[SessionStatus] = mapped_column(
         SQLEnum(
             SessionStatus,
