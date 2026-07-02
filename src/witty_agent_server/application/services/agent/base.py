@@ -19,8 +19,8 @@ class RuntimeWorkspaceResolverPort(Protocol):
 
 
 @runtime_checkable
-class OpenClawLifecyclePort(Protocol):
-    """OpenClaw 生命周期控制端口。"""
+class RuntimeLifecyclePort(Protocol):
+    """Runtime 生命周期控制端口。"""
 
     def probe_running(self) -> bool: ...
 
@@ -45,6 +45,10 @@ class OpenClawLifecyclePort(Protocol):
         skip_hooks: bool = True,
         skip_health: bool = False,
     ) -> None: ...
+
+
+# 向后兼容别名：历史代码以 OpenClawLifecyclePort 引用。
+OpenClawLifecyclePort = RuntimeLifecyclePort
 
 
 @runtime_checkable

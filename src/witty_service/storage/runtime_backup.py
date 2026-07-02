@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import shutil
 from pathlib import Path
-from typing import Literal
+
+from witty_service.config import get_settings
 
 
 class RuntimeBackupStore:
@@ -11,17 +12,28 @@ class RuntimeBackupStore:
     def __init__(self, base_path: str | Path = "~/.witty") -> None:
         self.base_path = Path(base_path).expanduser().resolve()
 
+    def _runtime_state_dir(self, runtime_type: str) -> Path:
+        """按 runtime_type 解析状态目录，优先使用配置。"""
+        settings = get_settings()
+        if runtime_type == "openclaw":
+            configured = settings.openclaw_gateway.state_dir
+            if configured:
+                return Path(configured).expanduser()
+        if runtime_type == "opencode":
+            return settings.opencode.state_dir_resolved()
+        return Path.home() / f".{runtime_type}"
+
     def backup(
         self,
         agent_id: str,
-        runtime_type: Literal["openclaw"] = "openclaw",
+        runtime_type: str = "openclaw",
     ) -> Path:
         """备份运行时文件到本地
 
-        源: ~/.openclaw
-        目标: ~/.witty/{agent_id}/runtime_backup/.openclaw
+        源: <runtime state_dir>
+        目标: ~/.witty/{agent_id}/runtime_backup/.{runtime_type}
         """
-        source = Path.home() / f".{runtime_type}"
+        source = self._runtime_state_dir(runtime_type)
         destination = self.base_path / agent_id / "runtime_backup" / f".{runtime_type}"
 
         if not source.exists():
@@ -33,29 +45,29 @@ class RuntimeBackupStore:
         shutil.copytree(source, destination)
         return destination
 
-    def restore(self, agent_id: str, runtime_type: Literal["openclaw"] = "openclaw") -> Path:
+    def restore(self, agent_id: str, runtime_type: str = "openclaw") -> Path:
         """恢复运行时备份到原位置
 
-        源: ~/.witty/{agent_id}/runtime_backup/.openclaw
-        目标: ~/.openclaw
+        源: ~/.witty/{agent_id}/runtime_backup/.{runtime_type}
+        目标: <runtime state_dir>
         """
         backup_path = self.base_path / agent_id / "runtime_backup" / f".{runtime_type}"
 
         if not backup_path.exists():
             raise FileNotFoundError(f"Backup not found for agent {agent_id}")
 
-        destination = Path.home() / f".{runtime_type}"
+        destination = self._runtime_state_dir(runtime_type)
         if destination.exists():
             shutil.rmtree(destination)
         shutil.copytree(backup_path, destination)
         return destination
 
-    def backup_exists(self, agent_id: str, runtime_type: Literal["openclaw"] = "openclaw") -> bool:
+    def backup_exists(self, agent_id: str, runtime_type: str = "openclaw") -> bool:
         """检查备份是否存在"""
         backup_path = self.base_path / agent_id / "runtime_backup" / f".{runtime_type}"
         return backup_path.exists()
 
-    def delete_backup(self, agent_id: str, runtime_type: Literal["openclaw"] = "openclaw") -> None:
+    def delete_backup(self, agent_id: str, runtime_type: str = "openclaw") -> None:
         """删除备份"""
         backup_path = self.base_path / agent_id / "runtime_backup" / f".{runtime_type}"
         if backup_path.exists():

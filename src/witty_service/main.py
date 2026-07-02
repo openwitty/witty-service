@@ -16,20 +16,6 @@ from witty_service.api.skills import router as skills_router
 from witty_service.application.skill_manager import SkillManager
 from witty_service.config import get_settings
 from witty_service.logger import configure_logging
-from witty_agent_server.api.routers.agent_router import create_agent_router
-from witty_agent_server.api.routers.session_router import (
-    build_default_session_service,
-    create_session_router,
-)
-from witty_agent_server.api.routers.session_ws_router import create_session_ws_router
-from witty_agent_server.application.services.agent import AgentService
-from witty_agent_server.application.services.session_state_sync_service import (
-    SessionStateSyncService,
-)
-from witty_agent_server.application.services.session_ws_orchestrator import (
-    SessionWSOrchestrator,
-)
-from witty_agent_server.application.services.task_pool import TaskPool
 
 logger = logging.getLogger(__name__)
 
@@ -40,17 +26,8 @@ def create_app(*, services: ServiceContainer | None = None) -> FastAPI:
     app.state.services = services or build_default_services()
     register_exception_handlers(app)
 
-    agent_service = AgentService()
-    session_service = build_default_session_service()
-    session_state_sync_service = SessionStateSyncService()
-    session_ws_orchestrator = SessionWSOrchestrator(
-        session_service=session_service,
-        agent_service=agent_service,
-        state_sync_service=session_state_sync_service,
-    )
-    task_pool = TaskPool(orchestrator=session_ws_orchestrator)
-
     settings = get_settings()
+    
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors.origins,
@@ -69,7 +46,7 @@ def create_app(*, services: ServiceContainer | None = None) -> FastAPI:
 
     @app.get("/server/capabilities")
     def capabilities() -> dict[str, list[str]]:
-        return {"supported_runtimes": ["openclaw"]}
+        return {"supported_runtimes": list(settings.runtime.supported)}
 
     @app.on_event("startup")
     def sync_awesome_openclaw_skills_on_startup() -> None:
@@ -180,20 +157,5 @@ def create_app(*, services: ServiceContainer | None = None) -> FastAPI:
     app.include_router(skills_router)
     app.include_router(backport_router)
     app.include_router(insight_router)
-
-    app.include_router(create_agent_router(agent_service))
-    app.include_router(
-        create_session_router(
-            session_service,
-            state_sync_service=session_state_sync_service,
-            agent_service=agent_service,
-        )
-    )
-    app.include_router(
-        create_session_ws_router(
-            task_pool=task_pool,
-            state_sync_service=session_state_sync_service,
-        )
-    )
 
     return app

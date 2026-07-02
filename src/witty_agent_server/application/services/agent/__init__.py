@@ -2,6 +2,7 @@ from witty_agent_server.application.services.agent.base import (
     AgentServiceBase,
     GatewayAgentClientPort,
     OpenClawLifecyclePort,
+    RuntimeLifecyclePort,
     RuntimeWorkspaceResolverPort,
 )
 from witty_agent_server.application.services.agent.errors import (
@@ -53,6 +54,7 @@ __all__ = [
     "OpenClawLifecycleError",
     "OpenClawLifecycleService",
     "OpenCodeAgentService",
+    "RuntimeLifecyclePort",
     "RuntimeWorkspaceResolver",
     "RuntimeWorkspaceResolverPort",
 ]

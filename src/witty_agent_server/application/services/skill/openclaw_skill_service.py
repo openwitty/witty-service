@@ -13,6 +13,12 @@ from witty_agent_server.application.services.skill.errors import (
     OpenClawSkillsQueryError,
     OpenClawSkillsUninstallError,
 )
+from witty_agent_server.application.services.skill.openclaw_skill_client import (
+    OpenClawSkillClient,
+)
+from witty_agent_server.application.services.skill.skill_client_port import (
+    SkillClientPort,
+)
 from witty_agent_server.infra.ws.openclaw_gateway_client import (
     OpenClawGatewayClientError,
 )
@@ -25,6 +31,13 @@ logger = logging.getLogger(__name__)
 class OpenClawSkillService(AgentSkillServiceBase):
     runtime_type = "openclaw"
     skills_dir = Path.home() / ".openclaw" / "skills"
+
+    def __init__(
+        self,
+        *,
+        skill_client: SkillClientPort | None = None,
+    ) -> None:
+        super().__init__(skill_client=skill_client or OpenClawSkillClient())
 
     @classmethod
     def _get_workspace_skills_dir(cls, agent_id: str | None) -> Path:
@@ -87,7 +100,7 @@ class OpenClawSkillService(AgentSkillServiceBase):
             agent_id,
         )
         try:
-            skills_payload = self._openclaw_client.get_skills_status(agent_id=agent_id)
+            skills_payload = self._require_skill_client().get_skills_status(agent_id=agent_id)
         except OpenClawGatewayClientError as exc:
             logger.exception(
                 "list_skills openclaw rpc failed, runtime_type=%s agent_id=%s code=%s",

@@ -307,6 +307,59 @@ class InsightSettings:
 
 
 # ==============================================================================
+# OpenCode 配置
+# ==============================================================================
+
+@dataclass(frozen=True)
+class OpenCodeSettings:
+    """OpenCode runtime 配置。
+    
+    环境变量:
+        OPENCODE_STATE_DIR: opencode 状态存储目录, 默认 ~/.opencode
+    """
+    state_dir: str = "~/.opencode"
+
+    @classmethod
+    def from_env(cls) -> "OpenCodeSettings":
+        return cls(
+            state_dir=os.getenv("OPENCODE_STATE_DIR", "~/.opencode"),
+        )
+
+    def state_dir_resolved(self) -> Path:
+        return Path(self.state_dir).expanduser().resolve(strict=False)
+
+
+# ==============================================================================
+# Runtime 统一配置
+# ==============================================================================
+
+@dataclass(frozen=True)
+class RuntimeSettings:
+    """Runtime 调度配置。
+
+    每个 agent-server 实例运行 ``default_type`` 指定的单个 runtime
+    ``supported`` 声明该镜像/部署能支持哪些 runtime 类型，供外界调度参考。
+
+    环境变量:
+        WITTY_RUNTIME_DEFAULT: 当前实例运行的 runtime 类型, 默认 openclaw
+        WITTY_RUNTIME_SUPPORTED: 镜像支持的所有 runtime 类型, 默认 openclaw,opencode
+    """
+    default_type: str = "openclaw"
+    supported: tuple[str, ...] = ("openclaw", "opencode")
+
+    @classmethod
+    def from_env(cls) -> "RuntimeSettings":
+        default_type = os.getenv("WITTY_RUNTIME_DEFAULT", "openclaw")
+        raw_supported = os.getenv("WITTY_RUNTIME_SUPPORTED", "openclaw,opencode")
+        supported = tuple(
+            item.strip() for item in raw_supported.split(",") if item.strip()
+        )
+        if not supported:
+            supported = (default_type,)
+        return cls(default_type=default_type, supported=supported)
+
+
+# ==============================================================================
 # 主配置类
 # ==============================================================================
 
@@ -326,6 +379,8 @@ class Settings:
     workspace: WorkspaceSettings
     openclaw: OpenClawSettings
     insight: InsightSettings
+    opencode: OpenCodeSettings
+    runtime: RuntimeSettings
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -340,6 +395,8 @@ class Settings:
             workspace=WorkspaceSettings.from_env(),
             openclaw=OpenClawSettings.from_env(),
             insight=InsightSettings.from_env(),
+            opencode=OpenCodeSettings.from_env(),
+            runtime=RuntimeSettings.from_env(),
         )
 
 
