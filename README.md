@@ -6,27 +6,32 @@ AI Agent 全生命周期管理服务。Witty-Service 提供智能体的创建、
 
 ## 目录
 
-- [项目介绍](#项目介绍)
-  - [功能特性](#功能特性)
-  - [技术架构](#技术架构)
-  - [整体框架图](#整体框架图)
-- [安装指南](#安装指南)
-  - [方式一：pip 安装](#方式一pip安装)
-  - [方式二：从源码安装](#方式二从源码安装)
-- [快速开始](#快速开始)
-- [配置说明](#配置说明)
-- [部署流程](#部署流程)
-  - [测试环境](#测试环境)
-  - [生产环境](#生产环境)
-- [本地开发](#本地开发)
-  - [环境搭建](#环境搭建)
-  - [项目结构](#项目结构)
-  - [常用开发命令](#常用开发命令)
-  - [代码贡献流程](#代码贡献流程)
-  - [开发规范](#开发规范)
-- [API 文档](#api-文档)
-- [许可证](#许可证)
-- [支持与反馈](#支持与反馈)
+- [Witty-Service](#witty-service)
+  - [目录](#目录)
+  - [项目介绍](#项目介绍)
+    - [功能特性](#功能特性)
+    - [技术架构](#技术架构)
+    - [整体框架图](#整体框架图)
+  - [安装指南](#安装指南)
+    - [方式一：pip安装](#方式一pip安装)
+    - [方式二：从源码安装](#方式二从源码安装)
+  - [快速开始](#快速开始)
+  - [配置说明](#配置说明)
+    - [核心配置](#核心配置)
+    - [Docker 沙箱配置](#docker-沙箱配置)
+  - [部署流程](#部署流程)
+    - [测试环境](#测试环境)
+    - [生产环境](#生产环境)
+    - [启动参数说明](#启动参数说明)
+    - [生产环境注意事项](#生产环境注意事项)
+  - [本地开发](#本地开发)
+    - [环境搭建](#环境搭建)
+    - [项目结构](#项目结构)
+    - [常用开发命令](#常用开发命令)
+    - [代码贡献流程](#代码贡献流程)
+    - [开发规范](#开发规范)
+  - [许可证](#许可证)
+  - [支持与反馈](#支持与反馈)
 
 ---
 
@@ -191,7 +196,7 @@ witty-service --host 0.0.0.0 --port 8000
 1. 克隆仓库：
 
 ```bash
-git clone https://github.com/witty/witty-service.git
+git clone https://gitcode.com/openeuler/witty-service.git
 cd witty-service
 ```
 
@@ -371,7 +376,7 @@ witty-service --host 0.0.0.0 --port 8000 --workers 4
 **方式二：从源码构建**
 
 ```bash
-git clone https://github.com/witty/witty-service.git
+git clone https://gitcode.com/openeuler/witty-service.git
 cd witty-service
 uv build
 uv pip install dist/witty_service-0.1.0-py3-none-any.whl
@@ -405,7 +410,7 @@ witty-service --host 0.0.0.0 --port 8000 --workers 4
 
 ```bash
 # 1. 克隆仓库
-git clone https://github.com/witty/witty-service.git
+git clone https://gitcode.com/openeuler/witty-service.git
 cd witty-service
 
 # 2. 创建虚拟环境并安装依赖
@@ -510,6 +515,6 @@ witty-service/
 
 ## 支持与反馈
 
-- **问题反馈** — 请在 [GitHub Issues](https://github.com/witty/witty-service/issues) 提交
+- **问题反馈** — 请在 [Gitcode Issues](https://gitcode.com/openeuler/witty-service/issues) 提交
 - **功能建议** — 欢迎通过 Issue 或 Pull Request 参与
-- **项目主页** — [https://github.com/witty/witty-service](https://github.com/witty/witty-service)
+- **项目主页** — [https://gitcode.com/openeuler/witty-service](https://gitcode.com/openeuler/witty-service)
