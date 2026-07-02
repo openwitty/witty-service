@@ -100,7 +100,7 @@ class OpenClawSkillService(AgentSkillServiceBase):
             agent_id,
         )
         try:
-            skills_payload = self._skill_client.get_skills_status(agent_id=agent_id)
+            skills_payload = self._require_skill_client().get_skills_status(agent_id=agent_id)
         except OpenClawGatewayClientError as exc:
             logger.exception(
                 "list_skills openclaw rpc failed, runtime_type=%s agent_id=%s code=%s",

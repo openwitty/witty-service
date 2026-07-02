@@ -18,6 +18,19 @@ class AgentSkillServiceBase(ABC):
     ) -> None:
         self._skill_client = skill_client
 
+    def _require_skill_client(self) -> SkillClientPort:
+        """返回 skill_client，若子类未提供则抛出清晰错误。
+
+        需要调用 skill_client 的子类应在 __init__中覆写并传入有效实现
+        """
+        if self._skill_client is None:
+            raise RuntimeError(
+                f"{type(self).__name__}: skill_client is required but was not "
+                f"provided. Override __init__ and pass a SkillClientPort "
+                f"implementation."
+            )
+        return self._skill_client
+
     @abstractmethod
     def list_skills(self, *, agent_id: str | None = None) -> dict[str, Any]:
         """查询当前 runtime 可用的技能列表。"""
